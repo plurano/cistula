@@ -136,12 +136,106 @@ def test_malformed_text_is_a_decode_error(text: str) -> None:
         loads_json(text)
 
 
-def test_numbers_json_does_not_have_are_read_as_the_standard_library_reads_them() -> None:
-    # Stated in the docstring of `loads_json`; `write_json` refuses all of them.
-    found: Any = loads_json("[NaN, Infinity, -Infinity, 1e999, -1e999]")
+NOT_FINITE = ["NaN", "Infinity", "-Infinity", "1e999", "-1e999", "1E400", "1.0e+400", "1.8e308", "-1.8e308"]
+AROUND_A_NUMBER = ["{}", "[1, {}]", '{{"a": {}}}', '{{"a": [{{"b": [0.5, {}]}}]}}']
 
-    assert math.isnan(found[0])
-    assert found[1:] == [math.inf, -math.inf, math.inf, -math.inf]
+
+def same(left: object, right: object) -> bool:
+    """Compare two parsed documents; unlike `==`, a NaN equals a NaN."""
+    return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
+
+
+@pytest.mark.parametrize("number", NOT_FINITE)
+@pytest.mark.parametrize("around", AROUND_A_NUMBER)
+def test_number_json_does_not_have_is_refused_when_read(around: str, number: str) -> None:
+    expected = "not a JSON number" if number.lstrip("-") in {"NaN", "Infinity"} else "too large for a float"
+
+    with pytest.raises(ValueError, match=expected) as caught:
+        loads_json(around.format(number))
+
+    assert number in str(caught.value)
+
+
+@pytest.mark.parametrize("number", NOT_FINITE)
+@pytest.mark.parametrize("around", AROUND_A_NUMBER)
+def test_finite_numbers_false_reads_it_as_the_standard_library_does(around: str, number: str) -> None:
+    text = around.format(number)
+
+    found = loads_json(text, finite_numbers=False)
+
+    assert same(found, json.loads(text))
+    assert not math.isfinite(json.loads(number))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "1.7976931348623157e308",
+        "-1.7976931348623157e308",
+        "5e-324",
+        "1e-999",
+        "-0.0",
+        "0.1",
+        "1" + "0" * 400,
+        "-1" + "0" * 400,
+        '"NaN"',
+        '{"Infinity": "-Infinity", "NaN": "1e999"}',
+    ],
+)
+def test_finite_number_at_the_limits_and_text_that_looks_like_one_are_read(text: str) -> None:
+    assert loads_json(text) == json.loads(text)
+    assert loads_json(text, finite_numbers=False) == json.loads(text)
+
+
+def test_a_float_is_read_as_the_nearest_float_and_an_integer_stays_exact() -> None:
+    found: Any = loads_json("[0.1, 1.0, 1e2, 12345678901234567890123]")
+
+    assert found == [0.1, 1.0, 100.0, 12345678901234567890123]
+    assert [type(item) for item in found] == [float, float, float, int]
+
+
+@pytest.mark.parametrize("text", ["nan", "inf", "-inf", "NAN", "Inf", "+Infinity", "-NaN", "1e", "0x10", "01"])
+def test_finite_numbers_false_reads_no_other_spelling(text: str) -> None:
+    with pytest.raises(json.JSONDecodeError):
+        loads_json(text, finite_numbers=False)
+    with pytest.raises(json.JSONDecodeError):
+        loads_json(text)
+
+
+def test_each_keyword_lifts_its_own_check_only() -> None:
+    with pytest.raises(DuplicateKeyError):
+        loads_json('{"a": NaN, "a": 1}', finite_numbers=False)
+    with pytest.raises(ValueError, match="not a JSON number: NaN"):
+        loads_json('{"a": NaN, "a": 1}', unique_keys=False)
+    with pytest.raises(ValueError, match="too large for a float: 1e999"):
+        loads_json('{"a": 1e999, "a": 1}', unique_keys=False)
+
+    assert same(loads_json('{"a": 1, "a": NaN}', unique_keys=False, finite_numbers=False), {"a": math.nan})
+
+
+def test_a_long_number_is_cut_short_in_the_message() -> None:
+    with pytest.raises(ValueError, match="too large for a float") as caught:
+        loads_json("1" + "0" * 500 + ".5")
+
+    assert len(str(caught.value)) < 80
+
+
+def test_the_reader_keywords_are_keyword_only() -> None:
+    refused: Any = loads_json
+
+    with pytest.raises(TypeError):
+        refused("1", True)  # noqa: FBT003 - the positional call is what is refused
+    with pytest.raises(TypeError):
+        refused("1", True, False)  # noqa: FBT003
+
+
+def test_what_the_reader_accepts_by_default_the_writer_writes(tmp_path: Path) -> None:
+    text = '{"big": 1.7976931348623157e308, "small": 5e-324, "long": 1' + "0" * 400 + "}"
+    path = tmp_path / "out.json"
+
+    write_json(path, loads_json(text))
+
+    assert read_json(path) == json.loads(text)
 
 
 @pytest.mark.parametrize("value", [b"{}", bytearray(b"{}"), None, 1])
@@ -168,6 +262,38 @@ def test_read_refuses_a_repeated_key_unless_told_otherwise(tmp_path: Path) -> No
     with pytest.raises(DuplicateKeyError):
         read_json(path)
     assert read_json(path, unique_keys=False) == {"a": 2}
+
+
+@pytest.mark.parametrize("number", NOT_FINITE)
+def test_read_refuses_a_number_json_does_not_have_unless_told_otherwise(tmp_path: Path, number: str) -> None:
+    path = tmp_path / "data.json"
+    path.write_text(f'{{"score": {number}}}', encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"not a JSON number|too large for a float"):
+        read_json(path)
+    with pytest.raises(ValueError, match=r"not a JSON number|too large for a float"):
+        read_json(path, unique_keys=False)
+    assert same(read_json(path, finite_numbers=False), {"score": float(number)})
+
+
+@pytest.mark.parametrize(
+    ("content", "error"),
+    [
+        (b'{"a": NaN, "a": 1}', DuplicateKeyError),
+        (b"\xef\xbb\xbf[NaN]", json.JSONDecodeError),
+        (b"[NaN, \xff]", UnicodeDecodeError),
+        (b"[NaN,]", json.JSONDecodeError),
+        (b"", json.JSONDecodeError),
+    ],
+)
+def test_read_with_finite_numbers_false_refuses_everything_else(
+    tmp_path: Path, content: bytes, error: type[Exception]
+) -> None:
+    path = tmp_path / "data.json"
+    path.write_bytes(content)
+
+    with pytest.raises(error):
+        read_json(path, finite_numbers=False)
 
 
 def test_read_missing_file(tmp_path: Path) -> None:
@@ -205,7 +331,7 @@ def test_read_refuses_a_byte_order_mark(tmp_path: Path) -> None:
 
 
 def test_every_content_error_is_a_value_error(tmp_path: Path) -> None:
-    for content in (b'{"a": 1, "a": 2}', b"\xff", b"{"):
+    for content in (b'{"a": 1, "a": 2}', b"\xff", b"{", b"NaN", b"[-Infinity]", b"1e999"):
         path = tmp_path / "bad.json"
         path.write_bytes(content)
         with pytest.raises(ValueError):  # noqa: PT011 - the shared base class is the point

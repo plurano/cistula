@@ -2,18 +2,22 @@
 # SPDX-License-Identifier: EUPL-1.2
 """Read JSON strictly and write files so that a reader never sees half of one.
 
-The readers decode UTF-8 and refuse an object that names the same key twice,
-which the standard library accepts silently by keeping the last value. The
-writers put the new content into a temporary file beside the target, flush it
-to disk and rename it over the target in one step: after a failure or a crash
-the target holds either the old content or the new, never a mixture. A writer
-called with `durable=False` leaves out the flush and with it the promise about
-a crash of the machine.
+The readers decode UTF-8 and refuse two things the standard library accepts
+silently: an object that names the same key twice (it keeps the last value)
+and a number JSON does not have (NaN, an infinity, a number too large for a
+float).
+
+The writers put the new content into a temporary file beside the target, flush
+it to disk and rename it over the target in one step: after a failure or a
+crash the target holds either the old content or the new, never a mixture. A
+writer called with `durable=False` leaves out the flush and with it the promise
+about a crash of the machine.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
 import secrets
 import stat
@@ -55,35 +59,63 @@ def _unique(pairs: list[tuple[str, JsonValue]]) -> dict[str, JsonValue]:
     return found
 
 
-def loads_json(text: str, *, unique_keys: bool = True) -> JsonValue:
-    """Parse a JSON document; an object with a repeated key raises `DuplicateKeyError`.
+def _refuse_constant(name: str) -> float:
+    message = f"not a JSON number: {name}"
+    raise ValueError(message)
 
+
+def _finite(text: str) -> float:
+    value = float(text)
+    if math.isinf(value):
+        message = f"number too large for a float: {text[:40]}"
+        raise ValueError(message)
+    return value
+
+
+def loads_json(text: str, *, unique_keys: bool = True, finite_numbers: bool = True) -> JsonValue:
+    """Parse a JSON document strictly.
+
+    An object with a repeated key raises `DuplicateKeyError`;
     `unique_keys=False` restores the standard library's behaviour of keeping
-    the last value. Everything else is `json.loads`: malformed text raises
-    `json.JSONDecodeError`. Both errors are `ValueError`.
+    the last value.
 
-    Also as `json.loads`, and beyond what JSON defines: `NaN`, `Infinity` and
-    `-Infinity` are read as these numbers, and a number too large for a float
-    is read as an infinity. `write_json` refuses to write any of them.
+    `NaN`, `Infinity` and `-Infinity`, which JSON does not have, and a number
+    too large for a float raise `ValueError`. `finite_numbers=False` restores
+    the standard library's behaviour: the three names are read as these
+    numbers and a number too large is read as an infinity. `write_json`
+    refuses to write any of them, so only a document read with the default can
+    always be written back.
+
+    Each keyword lifts its one check and nothing else. Everything else is
+    `json.loads`: malformed text raises `json.JSONDecodeError`. All of these
+    errors are `ValueError`.
     """
     if not isinstance(text, str):
         message = f"loads_json needs text, not {type(text).__name__}; read_json reads a file"
         raise TypeError(message)
-    hook = _unique if unique_keys else None
-    return cast("JsonValue", json.loads(text, object_pairs_hook=hook))
+    return cast(
+        "JsonValue",
+        json.loads(
+            text,
+            object_pairs_hook=_unique if unique_keys else None,
+            parse_constant=_refuse_constant if finite_numbers else None,
+            parse_float=_finite if finite_numbers else None,
+        ),
+    )
 
 
-def read_json(path: _Path, *, unique_keys: bool = True) -> JsonValue:
-    """Read a UTF-8 JSON file; an object with a repeated key raises `DuplicateKeyError`.
+def read_json(path: _Path, *, unique_keys: bool = True, finite_numbers: bool = True) -> JsonValue:
+    """Read a UTF-8 JSON file strictly; see `loads_json` for the two keywords.
 
-    Bytes that are not UTF-8 raise `UnicodeDecodeError`, malformed JSON
-    (including a byte-order mark) raises `json.JSONDecodeError`; like
-    `DuplicateKeyError`, both are `ValueError`. A missing or unreadable file raises
-    `OSError`.
+    An object with a repeated key raises `DuplicateKeyError`; NaN, an
+    infinity and a number too large for a float raise `ValueError`. Bytes that
+    are not UTF-8 raise `UnicodeDecodeError`, malformed JSON (including a
+    byte-order mark) raises `json.JSONDecodeError`. All of these are
+    `ValueError`. A missing or unreadable file raises `OSError`.
     """
     with open(path, "rb") as handle:
         text = handle.read().decode("utf-8")
-    return loads_json(text, unique_keys=unique_keys)
+    return loads_json(text, unique_keys=unique_keys, finite_numbers=finite_numbers)
 
 
 def _sync_directory(directory: str) -> None:

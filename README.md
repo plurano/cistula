@@ -43,7 +43,7 @@ network.
 | Module | What it does |
 | --- | --- |
 | `process` | `run` starts a command under a time limit the caller must state. `child_env` builds the environment for such a child. |
-| `files` | `read_json` and `loads_json` refuse a repeated key. `write_bytes_atomic`, `write_text_atomic` and `write_json` replace a file in one step. |
+| `files` | `read_json` and `loads_json` refuse a repeated key and a number JSON does not have. `write_bytes_atomic`, `write_text_atomic` and `write_json` replace a file in one step. |
 | `digest` | `sha256_file`, `sha256_bytes` and `sha256_text`. |
 
 ```python
@@ -80,9 +80,14 @@ write_json("record.json", record)
   read it (mode 644 under umask 022). The writers make no file private; a
   caller that needs that sets the umask or the mode itself.
 - **Strict JSON.** A repeated key, a byte-order mark and invalid UTF-8 are
-  errors when reading. `write_json` refuses NaN and the two infinities, which
-  JSON does not have, and leaves the old file whole. The readers still accept
-  them, as `json.loads` does.
+  errors when reading. So are NaN, the two infinities and a number too large
+  for a float, none of which JSON has: `json.loads` reads them silently, the
+  readers raise `ValueError`. `write_json` refuses the same values and leaves
+  the old file whole. A caller that must read a file holding such a number
+  passes `finite_numbers=False`; that lifts this one check and no other, as
+  `unique_keys=False` does for a repeated key
+  ([tests/test_files.py](tests/test_files.py),
+  `test_each_keyword_lifts_its_own_check_only`).
 
 ### Limits
 
