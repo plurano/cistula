@@ -59,6 +59,10 @@ def loads_json(text: str, *, unique_keys: bool = True) -> JsonValue:
     `unique_keys=False` restores the standard library's behaviour of keeping
     the last value. Everything else is `json.loads`: malformed text raises
     `json.JSONDecodeError`. Both errors are `ValueError`.
+
+    Also as `json.loads`, and beyond what JSON defines: `NaN`, `Infinity` and
+    `-Infinity` are read as these numbers, and a number too large for a float
+    is read as an infinity. `write_json` refuses to write any of them.
     """
     if not isinstance(text, str):
         message = f"loads_json needs text, not {type(text).__name__}; read_json reads a file"
@@ -169,8 +173,10 @@ def write_json(path: _Path, value: JsonValue, *, indent: int | None = 2, sort_ke
     """Replace the file at `path` with `value` as UTF-8 JSON in one step.
 
     The document ends with a newline; non-ASCII text is written as itself, not
-    escaped. A value JSON cannot represent raises `TypeError` before anything
-    is written. See `write_bytes_atomic` for what "in one step" guarantees.
+    escaped. A value JSON cannot represent is refused before anything is
+    written: NaN and the two infinities raise `ValueError`, a value of a type
+    JSON does not have raises `TypeError`. See `write_bytes_atomic` for what
+    "in one step" guarantees.
     """
-    text = json.dumps(value, indent=indent, sort_keys=sort_keys, ensure_ascii=False)
+    text = json.dumps(value, indent=indent, sort_keys=sort_keys, ensure_ascii=False, allow_nan=False)
     write_text_atomic(path, text + "\n")

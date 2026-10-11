@@ -69,7 +69,9 @@ write_json("record.json", record)
   point before the replace leaves the old file whole and no temporary file
   behind.
 - **Strict JSON.** A repeated key, a byte-order mark and invalid UTF-8 are
-  errors.
+  errors when reading. `write_json` refuses NaN and the two infinities, which
+  JSON does not have, and leaves the old file whole. The readers still accept
+  them, as `json.loads` does.
 
 ### Limits
 

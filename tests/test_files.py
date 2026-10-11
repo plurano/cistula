@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import array
 import json
+import math
 import os
 import re
 import signal
@@ -104,6 +105,14 @@ def test_unique_keys_false_keeps_the_last_value() -> None:
 def test_malformed_text_is_a_decode_error(text: str) -> None:
     with pytest.raises(json.JSONDecodeError):
         loads_json(text)
+
+
+def test_numbers_json_does_not_have_are_read_as_the_standard_library_reads_them() -> None:
+    # Stated in the docstring of `loads_json`; `write_json` refuses all of them.
+    found: Any = loads_json("[NaN, Infinity, -Infinity, 1e999, -1e999]")
+
+    assert math.isnan(found[0])
+    assert found[1:] == [math.inf, -math.inf, math.inf, -math.inf]
 
 
 @pytest.mark.parametrize("value", [b"{}", bytearray(b"{}"), None, 1])
@@ -542,3 +551,40 @@ def test_value_json_cannot_represent_leaves_the_old_file_whole(tmp_path: Path) -
 
     assert path.read_bytes() == b'{"old": true}\n'
     assert names(tmp_path) == ["kept.json"]
+
+
+@pytest.mark.parametrize("number", [math.nan, math.inf, -math.inf])
+@pytest.mark.parametrize("place", ["alone", "in a list", "in an object", "nested"])
+def test_number_json_does_not_have_is_refused_and_leaves_the_old_file_whole(
+    tmp_path: Path, number: float, place: str
+) -> None:
+    path = tmp_path / "kept.json"
+    path.write_bytes(b'{"old": true}\n')
+    values: dict[str, JsonValue] = {
+        "alone": number,
+        "in a list": [1.0, number],
+        "in an object": {"score": number},
+        "nested": {"runs": [{"scores": [0.5, number]}]},
+    }
+
+    with pytest.raises(ValueError, match="not JSON compliant"):
+        write_json(path, values[place])
+
+    assert path.read_bytes() == b'{"old": true}\n'
+    assert names(tmp_path) == ["kept.json"]
+
+
+def test_number_json_does_not_have_creates_no_file(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not JSON compliant"):
+        write_json(tmp_path / "never.json", {"score": math.nan})
+
+    assert names(tmp_path) == []
+
+
+@pytest.mark.parametrize("number", [sys.float_info.max, -sys.float_info.max, sys.float_info.min, 5e-324, -0.0, 1e308])
+def test_every_finite_number_is_written_and_reads_back_equal(tmp_path: Path, number: float) -> None:
+    path = tmp_path / "edge.json"
+
+    write_json(path, {"score": number})
+
+    assert read_json(path) == {"score": number}
