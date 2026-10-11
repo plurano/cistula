@@ -79,6 +79,15 @@ write_json("record.json", record)
   permissions of any newly created file, so the process umask decides who can
   read it (mode 644 under umask 022). The writers make no file private; a
   caller that needs that sets the umask or the mode itself.
+- **Directories.** A missing directory of the target raises
+  `FileNotFoundError`. A caller that wants it created passes `parents=True`;
+  missing directories above it are created too, as `os.makedirs` does. A new
+  directory gets its permissions the way a new file does, from the umask (mode
+  755 under umask 022); a directory that exists is left as it is. Directories
+  created stay when the write then fails: the one step is the file, not its
+  directories ([tests/test_files.py](tests/test_files.py),
+  `test_new_directories_take_their_permissions_from_the_umask`,
+  `test_directories_created_stay_when_the_write_fails`).
 - **Strict JSON.** A repeated key, a byte-order mark and invalid UTF-8 are
   errors when reading. So are NaN, the two infinities and a number too large
   for a float, none of which JSON has: `json.loads` reads them silently, the
@@ -91,8 +100,6 @@ write_json("record.json", record)
 
 ### Limits
 
-- The writers do not create the directory of the target; a missing directory
-  raises `FileNotFoundError`.
 - POSIX only. Process groups do not exist on Windows; `run` raises
   `NotImplementedError` there instead of running without the guarantee.
 - A descendant that moves itself into another session leaves the group and

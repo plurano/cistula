@@ -11,7 +11,8 @@ The writers put the new content into a temporary file beside the target, flush
 it to disk and rename it over the target in one step: after a failure or a
 crash the target holds either the old content or the new, never a mixture. A
 writer called with `durable=False` leaves out the flush and with it the promise
-about a crash of the machine.
+about a crash of the machine. A writer called with `parents=True` first creates
+the directory of the target where it is missing.
 """
 
 from __future__ import annotations
@@ -120,7 +121,7 @@ def read_json(path: _Path, *, unique_keys: bool = True, finite_numbers: bool = T
 
 
 def _sync_directory(directory: str) -> None:
-    """Flush the directory entry of a renamed file to disk."""
+    """Flush the entries of `directory` to disk: a renamed file, a new directory."""
     descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
     try:
         os.fsync(descriptor)
@@ -142,11 +143,43 @@ def _mode_to_keep(target: str) -> int | None:
     return stat.S_IMODE(found) if stat.S_ISREG(found) else None
 
 
-def _replace(path: _Path, write: Callable[[int], None], *, durable: bool) -> None:
-    """Write through `write` into a temporary file and rename it over `path`."""
-    if not isinstance(durable, bool):
-        message = f"durable must be True or False, not {type(durable).__name__}"
+def _switch(name: str, value: object) -> None:
+    """Refuse a value other than `True` or `False` for the keyword `name`."""
+    if not isinstance(value, bool):
+        message = f"{name} must be True or False, not {type(value).__name__}"
         raise TypeError(message)
+
+
+def _create_directories(directory: str, *, durable: bool) -> None:
+    """Create `directory` and every missing directory above it, the highest first.
+
+    A new directory gets the permissions of any newly created directory. With
+    `durable`, the directory above each new one is flushed to disk; `directory`
+    itself is flushed by the caller, after the rename.
+    """
+    missing: list[str] = []
+    current = directory
+    # Every step up removes at least one separator, so this bound is never short.
+    for _ in range(directory.count(os.sep) + 1):
+        if os.path.lexists(current):
+            break
+        missing.append(current)
+        current = os.path.dirname(current) or "."
+    for new in reversed(missing):
+        try:
+            os.mkdir(new)
+        except FileExistsError:
+            # Another writer was faster, or the path names a directory a second way (`a/..`).
+            if not os.path.isdir(new):
+                raise
+        if durable:
+            _sync_directory(os.path.dirname(new) or ".")
+
+
+def _replace(path: _Path, write: Callable[[int], None], *, durable: bool, parents: bool) -> None:
+    """Write through `write` into a temporary file and rename it over `path`."""
+    _switch("durable", durable)
+    _switch("parents", parents)
     target = os.fspath(path)
     if not isinstance(target, str):
         message = f"path must be text or a text path, not {type(target).__name__}"
@@ -156,6 +189,8 @@ def _replace(path: _Path, write: Callable[[int], None], *, durable: bool) -> Non
         message = f"not a file path: {target!r}"
         raise ValueError(message)
     directory = directory or "."
+    if parents:
+        _create_directories(directory, durable=durable)
     mode = _mode_to_keep(target)
     temporary = os.path.join(directory, f".{name}.{secrets.token_hex(8)}.tmp")
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o666)
@@ -179,24 +214,36 @@ def _replace(path: _Path, write: Callable[[int], None], *, durable: bool) -> Non
         _sync_directory(directory)
 
 
-def write_bytes_atomic(path: _Path, data: bytes | bytearray | memoryview, *, durable: bool = True) -> None:
+def write_bytes_atomic(
+    path: _Path, data: bytes | bytearray | memoryview, *, durable: bool = True, parents: bool = False
+) -> None:
     """Replace the file at `path` with `data` in one step.
 
-    The directory must exist; it is not created. When writing fails, `path`
-    is unchanged and no temporary file stays behind. Only a crash of the whole
-    process can leave a temporary file, named `.<name>.<random>.tmp`, beside
-    the unchanged target.
+    When writing fails, `path` is unchanged and no temporary file stays
+    behind. Only a crash of the whole process can leave a temporary file,
+    named `.<name>.<random>.tmp`, beside the unchanged target.
+
+    The directory of `path` must exist: a missing one raises
+    `FileNotFoundError`. `parents=True` creates it first, together with every
+    missing directory above it, as `os.makedirs` does. Directories created
+    stay when the write then fails; the one step is the file, not its
+    directories. Nothing is created for a call that is refused for its
+    arguments.
 
     Permissions: an existing file keeps its permissions. A new file gets the
     permissions of any newly created file, so the process umask decides who
     can read it (mode 644 under umask 022); no file is made private for the
     caller. A symbolic link at `path` is replaced by a regular file with the
-    permissions of a new file, its target is left alone.
+    permissions of a new file, its target is left alone. A directory created
+    for `parents=True` follows the same rule: it gets the permissions of any
+    newly created directory (mode 755 under umask 022), and a directory that
+    exists is left as it is.
 
     `durable=True` flushes the file to disk before the rename and the
-    directory after it, so the new content survives a power failure or a crash
-    of the operating system once the call has returned. `durable=False`
-    leaves out both flushes and is much faster on a disk. It is not
+    directory after it, and the directory above each directory it created, so
+    the new content survives a power failure or a crash of the operating
+    system once the call has returned. `durable=False` leaves out every flush
+    and is much faster on a disk. It is not
     crash-safe: the rename is still one step for every reader and after a
     failed write, but after a power failure or a crash of the operating system
     the target can hold the old content, the new content, or an empty or
@@ -212,24 +259,30 @@ def write_bytes_atomic(path: _Path, data: bytes | bytearray | memoryview, *, dur
         while written < len(view):
             written += os.write(descriptor, view[written:])
 
-    _replace(path, write, durable=durable)
+    _replace(path, write, durable=durable, parents=parents)
 
 
-def write_text_atomic(path: _Path, text: str, *, durable: bool = True) -> None:
+def write_text_atomic(path: _Path, text: str, *, durable: bool = True, parents: bool = False) -> None:
     """Replace the file at `path` with `text` as UTF-8 in one step.
 
     Line endings are written as given. See `write_bytes_atomic` for what
     "in one step" guarantees, for the permissions of the file and for
-    `durable`.
+    `durable` and `parents`.
     """
     if not isinstance(text, str):
         message = f"write_text_atomic needs text, not {type(text).__name__}"
         raise TypeError(message)
-    write_bytes_atomic(path, text.encode("utf-8"), durable=durable)
+    write_bytes_atomic(path, text.encode("utf-8"), durable=durable, parents=parents)
 
 
-def write_json(
-    path: _Path, value: JsonValue, *, indent: int | None = 2, sort_keys: bool = True, durable: bool = True
+def write_json(  # noqa: PLR0913 - one keyword per independent setting of the written file
+    path: _Path,
+    value: JsonValue,
+    *,
+    indent: int | None = 2,
+    sort_keys: bool = True,
+    durable: bool = True,
+    parents: bool = False,
 ) -> None:
     """Replace the file at `path` with `value` as UTF-8 JSON in one step.
 
@@ -238,7 +291,7 @@ def write_json(
     written: NaN and the two infinities raise `ValueError`, a value of a type
     JSON does not have raises `TypeError`. See `write_bytes_atomic` for what
     "in one step" guarantees, for the permissions of the file and for
-    `durable`.
+    `durable` and `parents`.
     """
     text = json.dumps(value, indent=indent, sort_keys=sort_keys, ensure_ascii=False, allow_nan=False)
-    write_text_atomic(path, text + "\n", durable=durable)
+    write_text_atomic(path, text + "\n", durable=durable, parents=parents)

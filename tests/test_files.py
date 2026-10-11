@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import array
+import inspect
 import json
 import math
 import os
@@ -601,6 +602,278 @@ def test_bytes_path_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(TypeError, match="path must be text"):
         write_bytes_atomic(path, b"data")
+
+
+# --- parents: creating the directory of the target -----------------------------------
+
+
+@pytest.mark.parametrize("writer", WRITERS)
+def test_parents_creates_every_missing_directory(tmp_path: Path, writer: Any) -> None:
+    path = tmp_path / "a" / "b" / "c" / "file"
+
+    writer(path, parents=True)
+
+    assert b"new" in path.read_bytes()
+    assert names(tmp_path) == ["a"]
+    assert names(tmp_path / "a") == ["b"]
+    assert names(tmp_path / "a" / "b") == ["c"]
+    assert names(tmp_path / "a" / "b" / "c") == ["file"]
+
+
+@pytest.mark.parametrize("writer", WRITERS)
+@pytest.mark.parametrize("options", [{}, {"parents": False}])
+def test_without_parents_a_missing_directory_is_refused(tmp_path: Path, writer: Any, options: dict[str, bool]) -> None:
+    with pytest.raises(FileNotFoundError):
+        writer(tmp_path / "absent" / "file", **options)
+
+    assert names(tmp_path) == []
+
+
+@pytest.mark.parametrize("writer", [write_bytes_atomic, write_text_atomic, write_json])
+def test_parents_is_a_keyword_only_and_off_by_default(writer: Any) -> None:
+    parameter = inspect.signature(writer).parameters["parents"]
+
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is False
+
+
+@pytest.mark.parametrize("writer", WRITERS)
+@pytest.mark.parametrize("parents", [None, 0, 1, "no", "False"])
+def test_parents_needs_true_or_false(tmp_path: Path, flushed: list[str], writer: Any, parents: Any) -> None:
+    with pytest.raises(TypeError, match="parents must be True or False"):
+        writer(tmp_path / "absent" / "file", parents=parents)
+
+    assert names(tmp_path) == []
+    assert flushed == []
+
+
+@pytest.mark.parametrize(("umask", "directory_mode", "file_mode"), [(0o022, 0o755, 0o644), (0o027, 0o750, 0o640)])
+def test_new_directories_take_their_permissions_from_the_umask(
+    tmp_path: Path, umask: int, directory_mode: int, file_mode: int
+) -> None:
+    previous = os.umask(umask)
+    try:
+        write_bytes_atomic(tmp_path / "a" / "b" / "file", b"data", parents=True)
+    finally:
+        os.umask(previous)
+
+    assert mode(tmp_path / "a") == directory_mode
+    assert mode(tmp_path / "a" / "b") == directory_mode
+    assert mode(tmp_path / "a" / "b" / "file") == file_mode
+
+
+@pytest.mark.usefixtures("umask_027")
+def test_parents_leaves_a_directory_that_exists_as_it_is(tmp_path: Path) -> None:
+    (tmp_path / "kept").mkdir()
+    (tmp_path / "kept").chmod(0o700)
+    (tmp_path / "kept" / "other").write_bytes(b"other content")
+
+    write_bytes_atomic(tmp_path / "kept" / "new" / "file", b"data", parents=True)
+
+    assert mode(tmp_path / "kept") == 0o700
+    assert mode(tmp_path / "kept" / "new") == 0o750
+    assert names(tmp_path / "kept") == ["new", "other"]
+    assert (tmp_path / "kept" / "other").read_bytes() == b"other content"
+
+
+@pytest.mark.parametrize("writer", WRITERS)
+def test_parents_changes_nothing_when_the_directory_exists(tmp_path: Path, flushed: list[str], writer: Any) -> None:
+    path = tmp_path / "kept"
+    path.write_bytes(b"old content")
+    path.chmod(0o640)
+
+    writer(path, parents=True)
+
+    assert b"new" in path.read_bytes()
+    assert mode(path) == 0o640
+    assert names(tmp_path) == ["kept"]
+    assert flushed == ["file", "directory"]
+
+
+def test_parents_flushes_each_directory_that_received_a_new_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_fsync = os.fsync
+    seen: list[int] = []
+
+    def recording_fsync(descriptor: int) -> None:
+        seen.append(os.fstat(descriptor).st_ino)
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+
+    write_bytes_atomic(tmp_path / "a" / "b" / "file", b"data", parents=True)
+    monkeypatch.undo()
+
+    # The directory above each new directory, the highest first; then the file, and its directory after the rename.
+    expected = [tmp_path, tmp_path / "a", tmp_path / "a" / "b" / "file", tmp_path / "a" / "b"]
+    assert seen == [path.stat().st_ino for path in expected]
+
+
+@pytest.mark.parametrize("writer", WRITERS)
+def test_parents_with_durable_false_flushes_nothing(tmp_path: Path, flushed: list[str], writer: Any) -> None:
+    writer(tmp_path / "a" / "b" / "file", parents=True, durable=False)
+
+    assert flushed == []
+    assert names(tmp_path / "a" / "b") == ["file"]
+
+
+@pytest.mark.parametrize("depth", [1, 2, 40])
+def test_parents_creates_one_directory_or_many(tmp_path: Path, depth: int) -> None:
+    path = tmp_path.joinpath(*["d"] * depth, "file")
+
+    write_bytes_atomic(path, b"data", parents=True, durable=False)
+
+    assert path.read_bytes() == b"data"
+
+
+@pytest.mark.parametrize("path", ["file", "a/file", "a/b/file", "./a/b/file", "a//b/file"])
+def test_parents_with_a_relative_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    write_bytes_atomic(path, b"data", parents=True)
+
+    assert (tmp_path / path).read_bytes() == b"data"
+    assert names(tmp_path) == [path.removeprefix("./").split("/")[0]]
+
+
+def test_parents_reads_a_path_through_a_missing_directory_as_makedirs_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("expected/a/../b")
+
+    write_bytes_atomic("found/a/../b/file", b"data", parents=True)
+
+    assert names(tmp_path / "found") == names(tmp_path / "expected") == ["a", "b"]
+    assert (tmp_path / "found" / "b" / "file").read_bytes() == b"data"
+
+
+def test_parents_follows_a_symbolic_link_to_a_directory(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+
+    write_bytes_atomic(tmp_path / "link" / "new" / "file", b"data", parents=True)
+
+    assert (tmp_path / "link").is_symlink()
+    assert (tmp_path / "real" / "new" / "file").read_bytes() == b"data"
+
+
+@pytest.mark.parametrize("below", ["file", "new/file"])
+def test_parents_does_not_create_the_target_of_a_dangling_symbolic_link(tmp_path: Path, below: str) -> None:
+    (tmp_path / "link").symlink_to(tmp_path / "absent")
+
+    with pytest.raises(FileNotFoundError):
+        write_bytes_atomic(tmp_path / "link" / below, b"data", parents=True)
+
+    assert names(tmp_path) == ["link"]
+
+
+@pytest.mark.parametrize("below", ["file", "new/file", "new/deeper/file"])
+def test_parents_refuses_a_file_where_a_directory_is_needed(tmp_path: Path, below: str) -> None:
+    (tmp_path / "taken").write_bytes(b"old content")
+
+    with pytest.raises(NotADirectoryError):
+        write_bytes_atomic(tmp_path / "taken" / below, b"data", parents=True)
+
+    assert (tmp_path / "taken").read_bytes() == b"old content"
+    assert names(tmp_path) == ["taken"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="the superuser may write into a directory without write permission")
+def test_parents_in_a_directory_without_write_permission_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "locked").mkdir()
+    (tmp_path / "locked").chmod(0o500)
+
+    try:
+        with pytest.raises(PermissionError):
+            write_bytes_atomic(tmp_path / "locked" / "new" / "file", b"data", parents=True)
+        assert names(tmp_path / "locked") == []
+    finally:
+        (tmp_path / "locked").chmod(0o700)
+
+
+def test_parents_accepts_a_directory_another_writer_created_meanwhile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_mkdir = os.mkdir
+
+    def late_mkdir(path: str) -> None:
+        real_mkdir(path)
+        real_mkdir(path)
+
+    monkeypatch.setattr(os, "mkdir", late_mkdir)
+
+    write_bytes_atomic(tmp_path / "a" / "b" / "file", b"data", parents=True)
+
+    assert (tmp_path / "a" / "b" / "file").read_bytes() == b"data"
+
+
+def test_parents_refuses_a_file_another_writer_created_meanwhile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_mkdir = os.mkdir
+
+    def late_mkdir(path: str) -> None:
+        with open(path, "wb"):
+            pass
+        real_mkdir(path)
+
+    monkeypatch.setattr(os, "mkdir", late_mkdir)
+
+    with pytest.raises(FileExistsError):
+        write_bytes_atomic(tmp_path / "a" / "file", b"data", parents=True)
+
+    assert (tmp_path / "a").is_file()
+
+
+@pytest.mark.parametrize("step", ["write", "fsync", "replace"])
+def test_directories_created_stay_when_the_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str
+) -> None:
+    monkeypatch.setattr(os, step, refuse)
+
+    with pytest.raises(OSError, match="planted"):
+        write_bytes_atomic(tmp_path / "a" / "b" / "file", b"data", parents=True, durable=step == "fsync")
+    monkeypatch.undo()
+
+    assert names(tmp_path) == ["a"]
+    assert names(tmp_path / "a") == (["b"] if step != "fsync" else [])
+    assert step == "fsync" or names(tmp_path / "a" / "b") == []
+
+
+def test_parents_creates_nothing_for_a_path_without_a_file_name(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not a file path"):
+        write_bytes_atomic(f"{tmp_path}/absent/directory/", b"data", parents=True)
+
+    assert names(tmp_path) == []
+
+
+def test_parents_creates_nothing_for_a_bytes_path(tmp_path: Path) -> None:
+    path: Any = os.fsencode(tmp_path / "absent" / "file")
+
+    with pytest.raises(TypeError, match="path must be text"):
+        write_bytes_atomic(path, b"data", parents=True)
+
+    assert names(tmp_path) == []
+
+
+def test_parents_creates_nothing_for_content_that_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "absent" / "file"
+    wrong: Any = "text"
+
+    with pytest.raises(TypeError, match="needs bytes"):
+        write_bytes_atomic(path, wrong, parents=True)
+    with pytest.raises(TypeError, match="needs text"):
+        write_text_atomic(path, wrong.encode(), parents=True)
+    with pytest.raises(UnicodeEncodeError):
+        write_text_atomic(path, "\ud800", parents=True)
+    with pytest.raises(ValueError, match="Out of range float values"):
+        write_json(path, math.nan, parents=True)
+    with pytest.raises(TypeError, match="not JSON serializable"):
+        write_json(path, wrong.encode(), parents=True)
+
+    assert names(tmp_path) == []
 
 
 # --- a failure between writing and replacing ---------------------------------------
