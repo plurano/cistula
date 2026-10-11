@@ -19,7 +19,11 @@ ENV = .venv/$(notdir $(PYTHON))
 # The licence check is not part of the lock (see requirements/dev.in).
 REUSE ?= reuse
 
-# Build date inside the wheel: the last commit, not the wall clock.
+# Where `package` puts the built files.
+DIST ?= dist
+
+# Build date inside the package: the last commit, not the wall clock. A build
+# of a tree with uncommitted changes carries the date of the commit below it.
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct)
 export SOURCE_DATE_EPOCH
 
@@ -27,7 +31,7 @@ export SOURCE_DATE_EPOCH
 # from running side by side.
 .NOTPARALLEL:
 
-.PHONY: verify-all verify fetch environment verify-static package verify-python lock clean
+.PHONY: verify-all verify fetch environment verify-static package verify-reproducible verify-python lock clean
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. It runs this
@@ -42,11 +46,11 @@ verify-all: verify
 
 # This repository's own checks; they need no engine. `fetch` is the only step
 # that reaches the package index; everything after it runs without a network.
-verify: fetch verify-static package
+verify: fetch verify-static package verify-reproducible
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory verify-python PYTHON="$$python"; \
 	done
-	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, package, and its tests on $(PYTHONS).'
+	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, package, same bytes from a second build, and its tests on $(PYTHONS).'
 
 fetch:
 	@set -e; for python in $(PYTHONS); do \
@@ -76,13 +80,33 @@ verify-static: environment
 	'$(ENV)/bin/python' tools/check_exceptions.py
 
 # One source distribution and one wheel, built once with the locked build
-# backend on the first interpreter; the wheel is built from the source
-# distribution, so a file missing there fails here. Every interpreter then
-# tests this one wheel. The hash printed last is the one a consumer pins.
+# backend on the first interpreter. Every interpreter then tests this one
+# wheel. The hashes printed last are the ones a consumer pins.
+#
+# The bytes depend on the commit only. The backend writes the clock, the
+# owner and the mode of each file into the source distribution, so it is
+# rewritten with all of that fixed and stored uncompressed. The wheel is built
+# from the rewritten file (a file missing there fails here), under a fixed
+# file mode mask, and stores its members uncompressed (setup.cfg): two
+# compression libraries give two outputs for the same input.
 package: environment
-	rm -rf dist
-	'$(ENV)/bin/python' -m build --no-isolation --outdir dist
-	sha256sum dist/*
+	rm -rf '$(DIST)'
+	umask 022 && '$(ENV)/bin/python' -m build --sdist --no-isolation --outdir '$(DIST)'
+	'$(ENV)/bin/python' tools/reproducible_sdist.py '$(DIST)'/*.tar.gz
+	umask 022 && '$(ENV)/bin/python' -m build --wheel --no-isolation --outdir '$(DIST)' '$(DIST)'/*.tar.gz
+	sha256sum '$(DIST)'/*
+
+# The same commit gives the same bytes: every interpreter builds the package
+# once more, later and under another file mode mask of the caller, and a
+# single differing byte fails. The report names the member and the field.
+# The interpreters differ in their compression library on some hosts, which
+# is the difference this check was first seen failing on.
+verify-reproducible:
+	@set -e; for python in $(PYTHONS); do \
+		again="build/again/$$(basename "$$python")"; \
+		( umask 077; $(MAKE) --no-print-directory package PYTHON="$$python" DIST="$$again" ); \
+		'$(ENV)/bin/python' tools/compare_packages.py dist "$$again"; \
+	done
 
 # Per interpreter: install the wheel and run the tests against the installed
 # package, not against the source tree. The interpreter is printed first so

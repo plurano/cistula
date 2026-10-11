@@ -99,9 +99,11 @@ with this line in the consumer's `requirements.txt`:
 plurano-python-library @ file:///path/to/dist/plurano_python_library-0.1.0.dev0-py3-none-any.whl --hash=sha256:<hash printed by make package>
 ```
 
-The bytes of the wheel depend on the commit and on the compression library of
-the interpreter that builds it. The hash to pin is the one of the file that is
-installed, not one computed from a second build.
+The bytes of the wheel and of the source distribution depend on the commit
+only: every host and every supported interpreter builds the same two files
+from the same commit. The hash to pin is the one `make package` prints for
+that commit, and a second build of it must print the same
+(see [Reproducible package](#reproducible-package)).
 
 ## Development
 
@@ -119,12 +121,13 @@ interpreter or a tool that is missing fails the gate.
 2. Format, lint, types, licence headers and the exception list are checked
    once.
 3. One source distribution and one wheel are built.
-4. That wheel is installed into each environment, and the tests run against
-   the installed package with 100 % branch coverage required.
-5. The standards engine checks that the agent contexts equal `AGENTS.md`,
+4. Every interpreter builds both once more. One differing byte fails.
+5. The wheel of step 3 is installed into each environment, and the tests run
+   against the installed package with 100 % branch coverage required.
+6. The standards engine checks that the agent contexts equal `AGENTS.md`,
    checks the register of the configured texts and runs its audit.
 
-`make verify` runs steps 1 to 4 and needs no engine.
+`make verify` runs steps 1 to 5 and needs no engine.
 
 `make lock` regenerates `requirements/dev.txt` from `requirements/dev.in`. A
 release younger than three days is not eligible.
@@ -132,6 +135,37 @@ release younger than three days is not eligible.
 Every public function has positive, negative and boundary tests. A test that
 guards a guarantee was seen failing once with the guarantee removed from the
 code.
+
+### Reproducible package
+
+`make package` gives the same bytes for the same commit on every host. Four
+things make it so:
+
+- **Date.** `SOURCE_DATE_EPOCH` is the time of the last commit
+  ([Makefile](Makefile)); the wall clock is never used.
+- **Source distribution.** The build backend records the build time, the
+  owner and the mode of each file. [tools/reproducible_sdist.py](tools/reproducible_sdist.py)
+  writes the archive again: members sorted by name, owned by nobody, mode 644
+  or 755, dated by the commit.
+- **Wheel.** It is built from the rewritten source distribution under the
+  file mode mask 022.
+- **No compression.** Both files store their members uncompressed
+  ([setup.cfg](setup.cfg) for the wheel). zlib and zlib-ng give different
+  bytes for the same input, and interpreters are built with either. The price
+  is size: about 174 kB and 46 kB instead of 36 kB and 19 kB.
+
+`make verify-reproducible` is the check, and part of the gate: each
+interpreter builds the package again under another file mode mask, and
+[tools/compare_packages.py](tools/compare_packages.py) fails on one differing
+byte, naming the archive member and the field.
+
+Two limits:
+
+- The date comes from the commit, so the hash means something for a clean
+  tree only.
+- A pull request run in CI builds the forge's test merge commit, which has
+  its own date. Its hashes are not those of the branch. The hashes of a build
+  on the main branch or on a tag are the ones to compare and to pin.
 
 ### Exceptions
 

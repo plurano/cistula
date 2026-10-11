@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime
-import importlib.util
 import os
 import shutil
 import subprocess
@@ -12,12 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from tool_loader import REPOSITORY, load_tool, script
+
 if TYPE_CHECKING:
     from pathlib import Path
-    from types import ModuleType
 
-REPOSITORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPT = os.path.join(REPOSITORY, "tools", "check_exceptions.py")
+SCRIPT = script("check_exceptions")
 TODAY = datetime.date(2026, 10, 11)
 
 # Planted files, judged by ruff's default rules in the planted repository.
@@ -26,16 +25,7 @@ FAILS_FORMAT = "VALUE  =  1\n"
 CLEAN = "VALUE = 1\n"
 
 
-def _load() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("check_exceptions", SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-check = _load()
+check = load_tool("check_exceptions")
 
 
 def entry(file: str | None = "hook.py", **changes: Any) -> dict[str, Any]:
