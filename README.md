@@ -43,7 +43,7 @@ network.
 | Module | What it does |
 | --- | --- |
 | `process` | `run` starts a command under a time limit the caller must state. `child_env` builds the environment for such a child. |
-| `files` | `read_json` and `loads_json` refuse a repeated key and a number JSON does not have. `write_bytes_atomic`, `write_text_atomic` and `write_json` replace a file in one step. |
+| `files` | `read_json` and `loads_json` refuse a repeated key and a number JSON does not have. `write_bytes_atomic`, `write_text_atomic` and `write_json` replace a file in one step. `open_bytes_atomic`, `open_text_atomic` and `staged_path` do that for content written in a `with` block. |
 | `digest` | `sha256_file`, `sha256_bytes` and `sha256_text`. |
 
 ```python
@@ -68,6 +68,42 @@ write_json("record.json", record)
   is flushed to disk and then replaces the target in one step. A failure at any
   point before the replace leaves the old file whole and no temporary file
   behind.
+- **Writing in a block.** Content that is produced in steps, or by a producer
+  that takes a file name, is written in a `with` block under the same
+  guarantee: the target is replaced when the block ends, and a block that
+  raises leaves the old file whole and no temporary file behind.
+
+  ```python
+  with open_text_atomic("rows.jsonl") as rows:
+      for record in records:
+          rows.write(json.dumps(record) + "\n")
+
+  with staged_path("table.parquet") as temporary:
+      frame.to_parquet(temporary)
+  ```
+
+  `open_bytes_atomic` and `open_text_atomic` lend an open file. Text is
+  written as UTF-8 with the line endings given, and what is still buffered
+  when the block ends is written before the rename. `staged_path` lends a
+  name instead, for a library call or a child process that opens the file
+  itself: an absolute path beside the target, of a file that does not exist
+  yet, ending with the suffix of the target. A relative target is tied to the
+  working directory at the start of the block, so the block may change the
+  directory ([tests/test_files.py](tests/test_files.py),
+  `test_text_still_buffered_when_the_block_ends_is_in_the_file_before_the_rename`,
+  `test_an_error_in_the_block_leaves_the_old_file_whole_and_reaches_the_caller`,
+  `test_a_block_may_change_the_current_directory`).
+- **What `staged_path` checks.** The producer must have closed the file before
+  the block ends. Content a producer still holds in memory is not in the
+  file, and only the producer knows. Two signs of that mistake are refused,
+  with the old file whole: no file under the name raises `FileNotFoundError`,
+  an empty file raises `ValueError`. A caller for whom an empty file is a
+  valid result passes `allow_empty=True`; a missing file is refused then too.
+  A link, a pipe or a directory under the name is refused, and a directory is
+  not removed. An existing target's permissions are applied when the block
+  ends; a new file keeps the permissions the producer gave it
+  (`test_staged_path_refuses_a_producer_that_wrote_no_file`,
+  `test_staged_path_refuses_the_file_of_a_producer_that_has_not_written_yet`).
 - **Durable by default.** The writers flush the file before the rename and the
   directory after it. On a disk a flush takes milliseconds where the write
   alone takes microseconds. A caller that writes many files it can make again
@@ -105,9 +141,14 @@ write_json("record.json", record)
 - A descendant that moves itself into another session leaves the group and
   outlives the kill. `run` still returns within the limit plus the grace
   period.
-- When the whole process is killed between write and replace, the old file is
-  whole, but the temporary file `.<name>.<16 hex digits>.tmp` stays in the
-  directory.
+- When the whole process is killed between write and replace, or inside a
+  block, the old file is whole, but the temporary file
+  `.<name>.<16 hex digits>.tmp` stays in the directory. The temporary file of
+  `staged_path` has the suffix of the target after `.tmp`.
+- `staged_path` cannot refuse a file that is neither empty nor complete: a
+  producer that wrote a part and still holds the rest gets that part
+  published
+  (`test_staged_path_cannot_see_what_a_producer_still_holds_in_a_file_that_is_not_empty`).
 - Python 3.11 or newer.
 
 ## Installing

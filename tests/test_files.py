@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import array
+import errno
+import functools
+import gc
 import inspect
+import io
 import json
 import math
 import os
@@ -19,11 +23,15 @@ import pytest
 from plurano_python_library.files import (
     DuplicateKeyError,
     loads_json,
+    open_bytes_atomic,
+    open_text_atomic,
     read_json,
+    staged_path,
     write_bytes_atomic,
     write_json,
     write_text_atomic,
 )
+from plurano_python_library.process import run
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -77,7 +85,31 @@ def write_as_json(path: Path, **options: Any) -> None:
     write_json(path, {"new": "content"}, **options)
 
 
-WRITERS = [write_as_bytes, write_as_text, write_as_json]
+def produce(temporary: str, data: bytes) -> None:
+    """A producer that takes a file name: it opens the file, writes it and closes it."""
+    with open(temporary, "wb") as handle:
+        handle.write(data)
+
+
+def write_as_open_bytes(path: Path, **options: Any) -> None:
+    with open_bytes_atomic(path, **options) as handle:
+        handle.write(b"new ")
+        handle.write(b"content")
+
+
+def write_as_open_text(path: Path, **options: Any) -> None:
+    with open_text_atomic(path, **options) as text:
+        text.write("new ")
+        text.write("content")
+
+
+def write_as_staged_path(path: Path, **options: Any) -> None:
+    with staged_path(path, **options) as temporary:
+        produce(temporary, b"new content")
+
+
+BLOCK_WRITERS = [write_as_open_bytes, write_as_open_text, write_as_staged_path]
+WRITERS = [write_as_bytes, write_as_text, write_as_json, *BLOCK_WRITERS]
 
 
 # --- loads_json ------------------------------------------------------------------
@@ -439,8 +471,9 @@ def test_content_and_directory_are_flushed_to_disk(
     assert flushed == ["file", "directory"]
 
 
+@pytest.mark.parametrize("writer", WRITERS)
 def test_the_file_is_flushed_before_the_rename_and_the_directory_after_it(
-    tmp_path: Path, flushed: list[str], monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, flushed: list[str], monkeypatch: pytest.MonkeyPatch, writer: Any
 ) -> None:
     real_replace = os.replace
     at_rename: list[list[str]] = []
@@ -451,7 +484,7 @@ def test_the_file_is_flushed_before_the_rename_and_the_directory_after_it(
 
     monkeypatch.setattr(os, "replace", recording_replace)
 
-    write_bytes_atomic(tmp_path / "ordered.bin", b"data")
+    writer(tmp_path / "ordered.bin")
 
     assert at_rename == [["file"]]
     assert flushed == ["file", "directory"]
@@ -629,7 +662,9 @@ def test_without_parents_a_missing_directory_is_refused(tmp_path: Path, writer: 
     assert names(tmp_path) == []
 
 
-@pytest.mark.parametrize("writer", [write_bytes_atomic, write_text_atomic, write_json])
+@pytest.mark.parametrize(
+    "writer", [write_bytes_atomic, write_text_atomic, write_json, open_bytes_atomic, open_text_atomic, staged_path]
+)
 def test_parents_is_a_keyword_only_and_off_by_default(writer: Any) -> None:
     parameter = inspect.signature(writer).parameters["parents"]
 
@@ -1106,3 +1141,689 @@ def test_every_finite_number_is_written_and_reads_back_equal(tmp_path: Path, num
     write_json(path, {"score": number})
 
     assert read_json(path) == {"score": number}
+
+
+# --- the block writers: open_bytes_atomic, open_text_atomic, staged_path ---------------
+
+BLOCKS = [open_bytes_atomic, open_text_atomic, staged_path]
+# The path form repeats the suffix of the target after `.tmp`.
+STAGED = re.compile(r"^\.(?P<name>.+)\.[0-9a-f]{16}\.tmp(?P<suffix>\..+)?$")
+
+
+class PlantedError(Exception):
+    """What the block of a test raises."""
+
+
+@pytest.fixture
+def at_rename(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
+    """What the temporary file holds at the moment of each rename."""
+    real_replace = os.replace
+    seen: list[bytes] = []
+
+    def reading_replace(source: str, destination: str) -> None:
+        with open(source, "rb") as handle:
+            seen.append(handle.read())
+        real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", reading_replace)
+    return seen
+
+
+def raise_in_open_bytes(path: Path, error: BaseException) -> None:
+    with open_bytes_atomic(path) as handle:
+        handle.write(b"new content")
+        handle.flush()
+        raise error
+
+
+def raise_in_open_text(path: Path, error: BaseException) -> None:
+    with open_text_atomic(path) as text:
+        text.write("new content")
+        text.flush()
+        raise error
+
+
+def raise_in_staged_path(path: Path, error: BaseException) -> None:
+    with staged_path(path) as temporary:
+        produce(temporary, b"new content")
+        raise error
+
+
+RAISING_BLOCKS = [raise_in_open_bytes, raise_in_open_text, raise_in_staged_path]
+
+
+def stage(path: Path | str, producer: Any, seen: list[str], **options: Any) -> None:
+    """Run `producer` on the staged path and record that path in `seen`."""
+    with staged_path(path, **options) as temporary:
+        seen.append(temporary)
+        producer(temporary)
+
+
+def kept_file(tmp_path: Path) -> Path:
+    path = tmp_path / "kept.txt"
+    path.write_bytes(b"old content")
+    path.chmod(0o600)
+    return path
+
+
+@pytest.mark.usefixtures("umask_027")
+def test_open_bytes_writes_in_steps_into_a_temporary_file_beside_the_target(tmp_path: Path) -> None:
+    path = tmp_path / "new.bin"
+
+    with open_bytes_atomic(path) as handle:
+        handle.write(b"\x00\x01")
+        handle.write(b"content")
+        handle.flush()
+        (temporary,) = names(tmp_path)
+        written = (tmp_path / temporary).read_bytes()
+
+    match = TEMPORARY.match(temporary)
+    assert match is not None
+    assert match.group("name") == "new.bin"
+    assert written == b"\x00\x01content"
+    assert isinstance(handle, io.BufferedWriter)
+    assert path.read_bytes() == b"\x00\x01content"
+    assert mode(path) == 0o640
+    assert names(tmp_path) == ["new.bin"]
+
+
+def test_open_text_writes_utf8_with_the_line_endings_given(tmp_path: Path) -> None:
+    path = tmp_path / "new.txt"
+
+    with open_text_atomic(path) as text:
+        text.write("Zeile 1\r\n")
+        text.write("Zeile 2\nohne Ende: ä€")
+
+    assert isinstance(text, io.TextIOWrapper)
+    assert text.encoding == "utf-8"
+    assert path.read_bytes() == "Zeile 1\r\nZeile 2\nohne Ende: ä€".encode()
+    assert names(tmp_path) == ["new.txt"]
+
+
+@pytest.mark.parametrize("writer", BLOCK_WRITERS)
+@pytest.mark.parametrize("permissions", [0o600, 0o644, 0o755, 0o400])
+def test_block_writer_replaces_an_existing_file_and_keeps_its_permissions(
+    tmp_path: Path, writer: Any, permissions: int
+) -> None:
+    path = tmp_path / "old.bin"
+    path.write_bytes(b"old content that is longer than the new one")
+    path.chmod(permissions)
+
+    writer(path)
+
+    assert path.read_bytes() == b"new content"
+    assert mode(path) == permissions
+    assert names(tmp_path) == ["old.bin"]
+
+
+def test_a_reader_sees_the_old_content_until_the_block_ends(tmp_path: Path) -> None:
+    path = tmp_path / "read.txt"
+    path.write_bytes(b"first")
+    seen: list[bytes] = []
+
+    with open_bytes_atomic(path) as handle:
+        handle.write(b"second")
+        handle.flush()
+        seen.append(path.read_bytes())
+    with open_text_atomic(path) as text:
+        text.write("third")
+        text.flush()
+        seen.append(path.read_bytes())
+    with staged_path(path) as temporary:
+        produce(temporary, b"fourth")
+        seen.append(path.read_bytes())
+
+    assert seen == [b"first", b"second", b"third"]
+    assert path.read_bytes() == b"fourth"
+
+
+def test_bytes_still_buffered_when_the_block_ends_are_in_the_file_before_the_rename(
+    tmp_path: Path, at_rename: list[bytes]
+) -> None:
+    with open_bytes_atomic(tmp_path / "buffered.bin") as handle:
+        handle.write(b"short enough to stay in the buffer")
+        (temporary,) = names(tmp_path)
+        size_in_the_block = (tmp_path / temporary).stat().st_size
+
+    assert size_in_the_block == 0
+    assert at_rename == [b"short enough to stay in the buffer"]
+
+
+def test_text_still_buffered_when_the_block_ends_is_in_the_file_before_the_rename(
+    tmp_path: Path, at_rename: list[bytes]
+) -> None:
+    # The mistake a text producer makes on a binary file: it leaves text in its buffer.
+    with open_text_atomic(tmp_path / "buffered.txt") as text:
+        text.write("short enough to stay in the buffer: ä\n")
+        (temporary,) = names(tmp_path)
+        size_in_the_block = (tmp_path / temporary).stat().st_size
+
+    assert size_in_the_block == 0
+    assert at_rename == ["short enough to stay in the buffer: ä\n".encode()]
+
+
+def test_a_block_may_close_the_file_it_was_lent(tmp_path: Path, flushed: list[str]) -> None:
+    with open_bytes_atomic(tmp_path / "bytes") as handle, handle:
+        handle.write(b"closed by the block")
+    with open_text_atomic(tmp_path / "text") as text, text:
+        text.write("closed by the block")
+    with open_bytes_atomic(tmp_path / "wrapped") as handle, io.TextIOWrapper(handle, encoding="utf-8") as wrapper:
+        wrapper.write("closed by a wrapper")
+
+    assert (tmp_path / "bytes").read_bytes() == b"closed by the block"
+    assert (tmp_path / "text").read_bytes() == b"closed by the block"
+    assert (tmp_path / "wrapped").read_bytes() == b"closed by a wrapper"
+    assert names(tmp_path) == ["bytes", "text", "wrapped"]
+    assert flushed == ["file", "directory"] * 3
+
+
+def test_the_lent_file_is_closed_when_the_block_has_ended(tmp_path: Path) -> None:
+    with open_bytes_atomic(tmp_path / "bytes") as handle:
+        handle.write(b"data")
+    with open_text_atomic(tmp_path / "text") as text:
+        text.write("data")
+
+    assert handle.closed
+    assert text.closed
+    with pytest.raises(ValueError, match="closed file"):
+        handle.write(b"late")
+    with pytest.raises(ValueError, match="closed file"):
+        text.write("late")
+    assert (tmp_path / "bytes").read_bytes() == b"data"
+    assert (tmp_path / "text").read_bytes() == b"data"
+
+
+@pytest.mark.parametrize("block", [open_bytes_atomic, open_text_atomic])
+def test_a_block_that_writes_nothing_makes_an_empty_file(tmp_path: Path, block: Any) -> None:
+    with block(tmp_path / "empty"):
+        pass
+
+    assert (tmp_path / "empty").read_bytes() == b""
+    assert names(tmp_path) == ["empty"]
+
+
+@pytest.mark.parametrize("size", [1, io.DEFAULT_BUFFER_SIZE, 1024 * 1024 + 1])
+def test_open_bytes_sizes_from_one_byte_to_many_buffers(tmp_path: Path, size: int) -> None:
+    path = tmp_path / "sized.bin"
+    data = bytes(index % 251 for index in range(size))
+
+    with open_bytes_atomic(path) as handle:
+        for start in range(0, size, 65521):
+            handle.write(data[start : start + 65521])
+
+    assert path.read_bytes() == data
+
+
+@pytest.mark.parametrize("block", RAISING_BLOCKS)
+@pytest.mark.parametrize("kind", [PlantedError, OSError, KeyboardInterrupt])
+def test_an_error_in_the_block_leaves_the_old_file_whole_and_reaches_the_caller(
+    tmp_path: Path, block: Any, kind: type[BaseException]
+) -> None:
+    path = kept_file(tmp_path)
+    error = kind("planted")
+
+    with pytest.raises(kind) as caught:
+        block(path, error)
+
+    assert caught.value is error
+    assert path.read_bytes() == b"old content"
+    assert mode(path) == 0o600
+    assert names(tmp_path) == ["kept.txt"]
+
+
+@pytest.mark.parametrize("block", RAISING_BLOCKS)
+def test_an_error_in_the_block_when_creating_a_file_leaves_nothing(tmp_path: Path, block: Any) -> None:
+    with pytest.raises(PlantedError):
+        block(tmp_path / "never.txt", PlantedError())
+
+    assert names(tmp_path) == []
+
+
+@pytest.mark.parametrize("writer", BLOCK_WRITERS)
+@pytest.mark.parametrize("step", ["fsync", "replace", "fchmod"])
+@pytest.mark.parametrize("failure", [refuse, interrupt])
+def test_block_writer_failure_at_any_step_leaves_the_old_file_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writer: Any, step: str, failure: Any
+) -> None:
+    path = kept_file(tmp_path)
+    monkeypatch.setattr(os, step, failure)
+
+    with pytest.raises((OSError, KeyboardInterrupt)):
+        writer(path)
+    monkeypatch.undo()
+
+    assert path.read_bytes() == b"old content"
+    assert mode(path) == 0o600
+    assert names(tmp_path) == ["kept.txt"]
+
+
+@pytest.mark.parametrize("block", RAISING_BLOCKS)
+def test_a_temporary_file_that_cannot_be_removed_is_reported_with_the_first_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, block: Any
+) -> None:
+    path = kept_file(tmp_path)
+    monkeypatch.setattr(os, "unlink", refuse)
+
+    with pytest.raises(OSError, match="planted: no space left on device") as caught:
+        block(path, PlantedError("first"))
+    monkeypatch.undo()
+
+    assert isinstance(caught.value.__context__, PlantedError)
+    assert path.read_bytes() == b"old content"
+    (left,) = [name for name in names(tmp_path) if name != "kept.txt"]
+    assert STAGED.match(left) is not None
+
+
+def lowest_free_descriptor() -> int:
+    probe = os.dup(0)
+    os.close(probe)
+    return probe
+
+
+def test_block_writers_leave_no_descriptor_open(tmp_path: Path) -> None:
+    path = kept_file(tmp_path)
+    before = lowest_free_descriptor()
+
+    for writer in BLOCK_WRITERS:
+        writer(path)
+    for block in RAISING_BLOCKS:
+        with pytest.raises(PlantedError):
+            block(path, PlantedError())
+    with pytest.raises(ValueError, match="an empty file"):
+        stage(path, functools.partial(produce, data=b""), [])
+    with pytest.raises(ValueError, match="not a regular file"):
+        stage(path, os.mkfifo, [])
+
+    assert lowest_free_descriptor() == before
+    assert names(tmp_path) == ["kept.txt"]
+
+
+def test_text_that_cannot_be_encoded_in_a_block_leaves_the_old_file_whole(tmp_path: Path) -> None:
+    path = kept_file(tmp_path)
+
+    def write_a_lone_surrogate() -> None:
+        with open_text_atomic(path) as text:
+            text.write("fine until here\n")
+            text.write("\ud800")
+
+    with pytest.raises(UnicodeEncodeError):
+        write_a_lone_surrogate()
+
+    assert path.read_bytes() == b"old content"
+    assert names(tmp_path) == ["kept.txt"]
+
+
+def fail_with_a_full_buffer(block: Any, path: Path, content: Any, lent: list[Any]) -> None:
+    with block(path) as handle:
+        handle.write(content)
+        lent.append((handle.fileno(), handle))
+        raise PlantedError
+
+
+@pytest.mark.parametrize(("block", "content"), [(open_bytes_atomic, b"lost"), (open_text_atomic, "lost")])
+def test_what_a_failed_block_left_in_the_buffer_reaches_no_other_file(tmp_path: Path, block: Any, content: Any) -> None:
+    lent: list[Any] = []
+    with pytest.raises(PlantedError):
+        fail_with_a_full_buffer(block, tmp_path / "never", content, lent)
+    number, handle = lent.pop()
+    closed = handle.closed
+
+    # The descriptor of the temporary file is closed. Its number now names another file, and
+    # the file object that was lent is thrown away with content still in its buffer.
+    other = os.open(tmp_path / "other", os.O_WRONLY | os.O_CREAT, 0o600)
+    if other != number:
+        os.dup2(other, number)
+        os.close(other)
+    try:
+        del handle
+        gc.collect()
+        reached_the_other_file = (tmp_path / "other").read_bytes()
+    finally:
+        os.close(number)
+
+    assert reached_the_other_file == b""
+    assert closed
+    assert names(tmp_path) == ["other"]
+
+
+def test_a_flush_that_fails_when_the_block_ends_leaves_the_old_file_whole(tmp_path: Path) -> None:
+    path = kept_file(tmp_path)
+    # The child may write four bytes to a file, not more: what the block left in the
+    # buffer does not fit, and the error comes from the flush at the end of the block.
+    code = """
+import errno, resource, sys
+from plurano_python_library import files
+
+resource.setrlimit(resource.RLIMIT_FSIZE, (4, resource.getrlimit(resource.RLIMIT_FSIZE)[1]))
+try:
+    with files.open_bytes_atomic(sys.argv[1]) as handle:
+        handle.write(b"new content")
+except OSError as error:
+    sys.exit(41 if error.errno == errno.EFBIG else 40)
+"""
+    done = subprocess.run([sys.executable, "-c", code, str(path)], check=False, timeout=60)
+
+    assert done.returncode == 41
+    assert path.read_bytes() == b"old content"
+    assert names(tmp_path) == ["kept.txt"]
+
+
+def test_a_block_may_change_the_current_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "start").mkdir()
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(tmp_path / "start")
+
+    with open_bytes_atomic("bytes") as handle:
+        os.chdir(tmp_path / "elsewhere")
+        handle.write(b"data")
+    os.chdir(tmp_path / "start")
+    with open_text_atomic("new/text", parents=True) as text:
+        os.chdir(tmp_path / "elsewhere")
+        text.write("data")
+    os.chdir(tmp_path / "start")
+    with staged_path("path") as temporary:
+        os.chdir(tmp_path / "elsewhere")
+        produce(temporary, b"data")
+
+    assert os.path.isabs(temporary)
+    assert names(tmp_path / "start") == ["bytes", "new", "path"]
+    assert names(tmp_path / "start" / "new") == ["text"]
+    assert names(tmp_path / "elsewhere") == []
+
+
+def change_directory_and_fail(block: Any, elsewhere: Path) -> None:
+    with block("file") as lent:
+        if isinstance(lent, str):
+            produce(lent, b"data")
+        os.chdir(elsewhere)
+        raise PlantedError
+
+
+@pytest.mark.parametrize("block", BLOCKS)
+def test_an_error_after_the_block_changed_the_directory_removes_the_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, block: Any
+) -> None:
+    (tmp_path / "start").mkdir()
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(tmp_path / "start")
+
+    with pytest.raises(PlantedError):
+        change_directory_and_fail(block, tmp_path / "elsewhere")
+
+    assert names(tmp_path / "start") == []
+    assert names(tmp_path / "elsewhere") == []
+
+
+@pytest.mark.parametrize("writer", BLOCK_WRITERS)
+def test_block_writer_reads_a_relative_path_as_the_file_system_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writer: Any
+) -> None:
+    (tmp_path / "start").mkdir()
+    (tmp_path / "elsewhere" / "deep").mkdir(parents=True)
+    (tmp_path / "start" / "link").symlink_to(tmp_path / "elsewhere" / "deep")
+    monkeypatch.chdir(tmp_path / "start")
+
+    # `link/..` is the directory above the target of the link, not the directory of the link.
+    writer("link/../file")
+
+    assert names(tmp_path / "start") == ["link"]
+    assert names(tmp_path / "elsewhere") == ["deep", "file"]
+
+
+@pytest.mark.parametrize("block", BLOCKS)
+def test_block_writer_refuses_a_path_it_cannot_write_before_it_creates_anything(tmp_path: Path, block: Any) -> None:
+    def enter(path: Any) -> None:
+        with block(path, parents=True):
+            pass
+
+    with pytest.raises(ValueError, match="not a file path"):
+        enter(f"{tmp_path}/absent/directory/")
+    with pytest.raises(TypeError, match="path must be text"):
+        enter(os.fsencode(tmp_path / "absent" / "file"))
+
+    assert names(tmp_path) == []
+
+
+@pytest.mark.parametrize("block", BLOCKS)
+def test_nothing_happens_before_the_block_is_entered(tmp_path: Path, block: Any) -> None:
+    block(tmp_path / "absent" / "file", parents=True, durable="not checked yet")
+
+    assert names(tmp_path) == []
+
+
+@pytest.mark.parametrize("block", BLOCKS)
+def test_block_writers_take_only_the_path_by_position(block: Any) -> None:
+    parameters = inspect.signature(block).parameters
+    by_keyword = {name for name, parameter in parameters.items() if parameter.kind is inspect.Parameter.KEYWORD_ONLY}
+
+    assert set(parameters) - by_keyword == {"path"}
+    assert parameters["durable"].default is True
+    assert parameters["parents"].default is False
+
+
+# --- staged_path: the producer opens the file -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "suffix"),
+    [("table.parquet", ".parquet"), ("archive.tar.gz", ".gz"), ("plain", None), (".hidden", None)],
+)
+def test_staged_path_names_a_missing_file_beside_the_target_with_its_suffix(
+    tmp_path: Path, name: str, suffix: str | None
+) -> None:
+    with staged_path(tmp_path / name) as temporary:
+        there_before = os.path.lexists(temporary) or names(tmp_path) != []
+        produce(temporary, b"data")
+
+    match = STAGED.match(os.path.basename(temporary))
+    assert match is not None
+    assert match.group("name") == name
+    assert match.group("suffix") == suffix
+    assert os.path.dirname(temporary) == str(tmp_path)
+    assert not there_before
+    assert (tmp_path / name).read_bytes() == b"data"
+    assert names(tmp_path) == [name]
+
+
+@pytest.mark.parametrize("options", [{}, {"allow_empty": True}])
+def test_staged_path_refuses_a_producer_that_wrote_no_file(tmp_path: Path, options: dict[str, bool]) -> None:
+    path = kept_file(tmp_path)
+    seen: list[str] = []
+
+    with pytest.raises(FileNotFoundError, match="nothing was written to the staged path") as caught:
+        stage(path, len, seen, **options)
+
+    assert caught.value.filename == seen[0]
+    assert path.read_bytes() == b"old content"
+    assert names(tmp_path) == ["kept.txt"]
+
+
+def test_staged_path_refuses_an_empty_file(tmp_path: Path) -> None:
+    path = kept_file(tmp_path)
+
+    with pytest.raises(ValueError, match=r"an empty file at the staged path.*allow_empty=True"):
+        stage(path, functools.partial(produce, data=b""), [])
+
+    assert path.read_bytes() == b"old content"
+    assert names(tmp_path) == ["kept.txt"]
+
+
+def test_staged_path_refuses_the_file_of_a_producer_that_has_not_written_yet(tmp_path: Path) -> None:
+    path = kept_file(tmp_path)
+    unclosed: list[Any] = []
+
+    def produce_without_closing(temporary: str) -> None:
+        # The planted mistake: the producer leaves its file open, the content is still in its buffer.
+        unclosed.append(open(temporary, "wb"))  # noqa: SIM115
+        unclosed[0].write(b"still in the buffer of the producer")
+
+    with pytest.raises(ValueError, match="an empty file at the staged path"):
+        stage(path, produce_without_closing, [])
+    unclosed[0].close()
+
+    assert path.read_bytes() == b"old content"
+    assert names(tmp_path) == ["kept.txt"]
+
+
+def test_staged_path_cannot_see_what_a_producer_still_holds_in_a_file_that_is_not_empty(tmp_path: Path) -> None:
+    # The limit the documentation states: only the producer knows whether it is done.
+    path = tmp_path / "cut.bin"
+    first = b"x" * io.DEFAULT_BUFFER_SIZE
+    unclosed: list[Any] = []
+
+    def produce_without_closing(temporary: str) -> None:
+        unclosed.append(open(temporary, "wb"))  # noqa: SIM115
+        unclosed[0].write(first)
+        unclosed[0].flush()
+        unclosed[0].write(b"the end")
+
+    stage(path, produce_without_closing, [])
+    published = path.read_bytes()
+    unclosed[0].close()
+
+    assert published == first
+    assert path.read_bytes() == first + b"the end"
+
+
+def test_allow_empty_publishes_an_empty_file(tmp_path: Path, flushed: list[str]) -> None:
+    path = kept_file(tmp_path)
+
+    stage(path, functools.partial(produce, data=b""), [], allow_empty=True)
+
+    assert path.read_bytes() == b""
+    assert mode(path) == 0o600
+    assert names(tmp_path) == ["kept.txt"]
+    assert flushed == ["file", "directory"]
+
+
+@pytest.mark.parametrize("allow_empty", [None, 0, 1, "no", "False"])
+def test_allow_empty_needs_true_or_false(tmp_path: Path, allow_empty: Any) -> None:
+    seen: list[str] = []
+
+    with pytest.raises(TypeError, match="allow_empty must be True or False"):
+        stage(tmp_path / "absent" / "file", functools.partial(produce, data=b"data"), seen, allow_empty=allow_empty)
+
+    assert seen == []
+    assert names(tmp_path) == []
+
+
+def test_allow_empty_is_a_keyword_only_and_off_by_default() -> None:
+    parameter = inspect.signature(staged_path).parameters["allow_empty"]
+
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is False
+
+
+@pytest.mark.usefixtures("umask_027")
+def test_staged_path_new_file_keeps_the_permissions_the_producer_gave_it(tmp_path: Path) -> None:
+    def produce_private(temporary: str) -> None:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.write(descriptor, b"data")
+        os.close(descriptor)
+
+    stage(tmp_path / "private", produce_private, [])
+    stage(tmp_path / "plain", functools.partial(produce, data=b"data"), [])
+
+    assert mode(tmp_path / "private") == 0o600
+    assert mode(tmp_path / "plain") == 0o640
+
+
+def test_staged_path_refuses_a_symbolic_link_and_leaves_its_target_alone(tmp_path: Path) -> None:
+    path = kept_file(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.write_bytes(b"content elsewhere")
+
+    with pytest.raises(OSError, match="symbolic link") as caught:
+        stage(path, functools.partial(os.symlink, elsewhere), [])
+
+    assert caught.value.errno == errno.ELOOP
+    assert path.read_bytes() == b"old content"
+    assert not path.is_symlink()
+    assert elsewhere.read_bytes() == b"content elsewhere"
+    assert names(tmp_path) == ["elsewhere", "kept.txt"]
+
+
+def test_staged_path_refuses_a_pipe_without_waiting_for_its_writer(tmp_path: Path) -> None:
+    path = kept_file(tmp_path)
+
+    with pytest.raises(ValueError, match="not a regular file at the staged path"):
+        stage(path, os.mkfifo, [])
+
+    assert path.read_bytes() == b"old content"
+    assert names(tmp_path) == ["kept.txt"]
+
+
+def test_staged_path_refuses_a_directory_and_does_not_remove_it(tmp_path: Path) -> None:
+    path = kept_file(tmp_path)
+    seen: list[str] = []
+
+    with pytest.raises(ValueError, match="not a regular file at the staged path"):
+        stage(path, os.mkdir, seen)
+
+    assert path.read_bytes() == b"old content"
+    assert names(tmp_path) == sorted([os.path.basename(seen[0]), "kept.txt"])
+    assert os.path.isdir(seen[0])
+
+
+def test_staged_path_serves_a_child_process_that_runs_in_another_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "work").mkdir()
+    monkeypatch.chdir(tmp_path)
+    code = "import sys\nwith open(sys.argv[1], 'wb') as handle:\n    handle.write(b'from the child')\n"
+
+    with staged_path("out.bin") as temporary:
+        run([sys.executable, "-c", code, temporary], timeout=60, cwd=tmp_path / "work", check=True)
+
+    assert (tmp_path / "out.bin").read_bytes() == b"from the child"
+    assert names(tmp_path) == ["out.bin", "work"]
+    assert names(tmp_path / "work") == []
+
+
+# --- a process killed inside a block ----------------------------------------------------
+
+KILLED_IN_A_BLOCK = {
+    "open_bytes_atomic": """
+with files.open_bytes_atomic(sys.argv[1]) as handle:
+    handle.write(b"new content")
+    handle.flush()
+    os.kill(os.getpid(), signal.SIGKILL)
+""",
+    "open_text_atomic": """
+with files.open_text_atomic(sys.argv[1]) as text:
+    text.write("new content")
+    text.flush()
+    os.kill(os.getpid(), signal.SIGKILL)
+""",
+    "staged_path": """
+with files.staged_path(sys.argv[1]) as temporary:
+    with open(temporary, "wb") as handle:
+        handle.write(b"new content")
+    os.kill(os.getpid(), signal.SIGKILL)
+""",
+}
+
+
+@pytest.mark.parametrize("block", sorted(KILLED_IN_A_BLOCK))
+def test_process_killed_inside_a_block_leaves_the_old_file_whole(tmp_path: Path, block: str) -> None:
+    path = tmp_path / "survivor.txt"
+    path.write_bytes(b"old content")
+    code = "import os, signal, sys\nfrom plurano_python_library import files\n" + KILLED_IN_A_BLOCK[block]
+
+    done = subprocess.run([sys.executable, "-c", code, str(path)], check=False, timeout=60)
+
+    assert done.returncode == -signal.SIGKILL
+    assert path.read_bytes() == b"old content"
+    # The temporary file stays, under its documented name, and is in nobody's way.
+    (left,) = [name for name in names(tmp_path) if name != "survivor.txt"]
+    match = STAGED.match(left)
+    assert match is not None
+    assert match.group("name") == "survivor.txt"
+    assert match.group("suffix") == (".txt" if block == "staged_path" else None)
+    assert (tmp_path / left).read_bytes() == b"new content"
+
+    write_as_staged_path(path)
+    write_as_open_bytes(path)
+
+    assert path.read_bytes() == b"new content"
+    assert names(tmp_path) == sorted([left, "survivor.txt"])
