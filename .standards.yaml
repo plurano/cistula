@@ -18,6 +18,17 @@ facets:
 # library flavor lands.
 flavors:
   - name: python-ml
+# Installed set: Claude Code, Codex, Gemini and Antigravity, opencode.
+# opencode reads AGENTS.md and has no id.
+# Editors: the engine's own selection plus antigravity; it has no file of its own here.
+editors:
+  - universal
+  - vscode
+  - antigravity
+agent_clients:
+  - claude
+  - codex
+  - gemini
 register:
   sources:
     expected: 13
