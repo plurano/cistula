@@ -13,6 +13,7 @@ path = [
     "README.md",
     ".gitignore",
     "requirements/dev.txt",
+    "renovate.json",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Lusoris <lusoris@proton.me>"
