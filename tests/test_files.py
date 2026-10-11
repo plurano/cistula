@@ -50,6 +50,35 @@ def names(directory: Path) -> list[str]:
     return sorted(entry.name for entry in directory.iterdir())
 
 
+@pytest.fixture
+def flushed(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Every flush to disk during the test, in order: "file" or "directory"."""
+    real_fsync = os.fsync
+    seen: list[str] = []
+
+    def recording_fsync(descriptor: int) -> None:
+        seen.append("directory" if stat.S_ISDIR(os.fstat(descriptor).st_mode) else "file")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    return seen
+
+
+def write_as_bytes(path: Path, **options: Any) -> None:
+    write_bytes_atomic(path, b"new content", **options)
+
+
+def write_as_text(path: Path, **options: Any) -> None:
+    write_text_atomic(path, "new content", **options)
+
+
+def write_as_json(path: Path, **options: Any) -> None:
+    write_json(path, {"new": "content"}, **options)
+
+
+WRITERS = [write_as_bytes, write_as_text, write_as_json]
+
+
 # --- loads_json ------------------------------------------------------------------
 
 
@@ -272,20 +301,110 @@ def test_short_writes_of_a_view_with_wide_items_are_continued(tmp_path: Path, mo
     assert (tmp_path / "wide.bin").read_bytes() == numbers.tobytes()
 
 
-def test_content_and_directory_are_flushed_to_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    real_fsync = os.fsync
-    flushed: list[bool] = []
-
-    def recording_fsync(descriptor: int) -> None:
-        flushed.append(stat.S_ISDIR(os.fstat(descriptor).st_mode))
-        real_fsync(descriptor)
-
-    monkeypatch.setattr(os, "fsync", recording_fsync)
-
-    write_bytes_atomic(tmp_path / "durable.bin", b"data")
+@pytest.mark.parametrize("writer", WRITERS)
+@pytest.mark.parametrize("options", [{}, {"durable": True}])
+def test_content_and_directory_are_flushed_to_disk(
+    tmp_path: Path, flushed: list[str], writer: Any, options: dict[str, bool]
+) -> None:
+    writer(tmp_path / "durable", **options)
 
     # First the file, before the rename; then the directory, after it.
-    assert flushed == [False, True]
+    assert flushed == ["file", "directory"]
+
+
+def test_the_file_is_flushed_before_the_rename_and_the_directory_after_it(
+    tmp_path: Path, flushed: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_replace = os.replace
+    at_rename: list[list[str]] = []
+
+    def recording_replace(source: str, destination: str) -> None:
+        at_rename.append(list(flushed))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", recording_replace)
+
+    write_bytes_atomic(tmp_path / "ordered.bin", b"data")
+
+    assert at_rename == [["file"]]
+    assert flushed == ["file", "directory"]
+
+
+@pytest.mark.parametrize("writer", WRITERS)
+def test_durable_false_replaces_the_file_without_a_flush(tmp_path: Path, flushed: list[str], writer: Any) -> None:
+    path = tmp_path / "fast"
+    path.write_bytes(b"old content")
+    path.chmod(0o640)
+
+    writer(path, durable=False)
+
+    assert flushed == []
+    assert b"new" in path.read_bytes()
+    assert b"old" not in path.read_bytes()
+    assert mode(path) == 0o640
+    assert names(tmp_path) == ["fast"]
+
+
+@pytest.mark.usefixtures("umask_027")
+def test_durable_false_gives_a_new_file_the_default_permissions(tmp_path: Path) -> None:
+    write_bytes_atomic(tmp_path / "fast.bin", b"data", durable=False)
+
+    assert (tmp_path / "fast.bin").read_bytes() == b"data"
+    assert mode(tmp_path / "fast.bin") == 0o640
+
+
+def test_durable_false_does_not_depend_on_a_flush_that_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "fsync", refuse)
+
+    with pytest.raises(OSError, match="planted"):
+        write_bytes_atomic(tmp_path / "durable.bin", b"data")
+    write_bytes_atomic(tmp_path / "fast.bin", b"data", durable=False)
+    monkeypatch.undo()
+
+    assert names(tmp_path) == ["fast.bin"]
+
+
+@pytest.mark.parametrize("step", ["write", "replace", "fchmod"])
+@pytest.mark.parametrize("failure", ["refuse", "interrupt"])
+def test_durable_false_failure_at_any_step_leaves_the_old_file_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str, failure: str
+) -> None:
+    path = tmp_path / "kept.txt"
+    path.write_bytes(b"old content")
+    path.chmod(0o600)
+    monkeypatch.setattr(os, step, {"refuse": refuse, "interrupt": interrupt}[failure])
+
+    with pytest.raises((OSError, KeyboardInterrupt)):
+        write_bytes_atomic(path, b"new content", durable=False)
+    monkeypatch.undo()
+
+    assert path.read_bytes() == b"old content"
+    assert mode(path) == 0o600
+    assert names(tmp_path) == ["kept.txt"]
+
+
+@pytest.mark.parametrize("writer", WRITERS)
+@pytest.mark.parametrize("durable", [None, 0, 1, "no", "False"])
+def test_durable_needs_true_or_false(tmp_path: Path, flushed: list[str], writer: Any, durable: Any) -> None:
+    path = tmp_path / "kept"
+    path.write_bytes(b"old content")
+
+    with pytest.raises(TypeError, match="durable must be True or False"):
+        writer(path, durable=durable)
+
+    assert path.read_bytes() == b"old content"
+    assert names(tmp_path) == ["kept"]
+    assert flushed == []
+
+
+@pytest.mark.parametrize("writer", [write_bytes_atomic, write_text_atomic, write_json])
+def test_durable_is_a_keyword_only(tmp_path: Path, writer: Any) -> None:
+    content: Any = b"data" if writer is write_bytes_atomic else "data"
+
+    with pytest.raises(TypeError, match="positional"):
+        writer(tmp_path / "never", content, False)  # noqa: FBT003
+
+    assert names(tmp_path) == []
 
 
 @pytest.mark.usefixtures("umask_027")

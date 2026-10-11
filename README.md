@@ -68,6 +68,17 @@ write_json("record.json", record)
   is flushed to disk and then replaces the target in one step. A failure at any
   point before the replace leaves the old file whole and no temporary file
   behind.
+- **Durable by default.** The writers flush the file before the rename and the
+  directory after it. On a disk a flush takes milliseconds where the write
+  alone takes microseconds. A caller that writes many files it can make again
+  passes `durable=False`. That call is **not crash-safe**: after a power
+  failure or a crash of the operating system the target can hold the old
+  content, the new content, or an empty or incomplete file. The replace is
+  still one step for every reader.
+- **Permissions.** An existing file keeps its permissions. A new file gets the
+  permissions of any newly created file, so the process umask decides who can
+  read it (mode 644 under umask 022). The writers make no file private; a
+  caller that needs that sets the umask or the mode itself.
 - **Strict JSON.** A repeated key, a byte-order mark and invalid UTF-8 are
   errors when reading. `write_json` refuses NaN and the two infinities, which
   JSON does not have, and leaves the old file whole. The readers still accept
@@ -75,6 +86,8 @@ write_json("record.json", record)
 
 ### Limits
 
+- The writers do not create the directory of the target; a missing directory
+  raises `FileNotFoundError`.
 - POSIX only. Process groups do not exist on Windows; `run` raises
   `NotImplementedError` there instead of running without the guarantee.
 - A descendant that moves itself into another session leaves the group and

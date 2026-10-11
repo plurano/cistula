@@ -6,7 +6,9 @@ The readers decode UTF-8 and refuse an object that names the same key twice,
 which the standard library accepts silently by keeping the last value. The
 writers put the new content into a temporary file beside the target, flush it
 to disk and rename it over the target in one step: after a failure or a crash
-the target holds either the old content or the new, never a mixture.
+the target holds either the old content or the new, never a mixture. A writer
+called with `durable=False` leaves out the flush and with it the promise about
+a crash of the machine.
 """
 
 from __future__ import annotations
@@ -93,8 +95,25 @@ def _sync_directory(directory: str) -> None:
         os.close(descriptor)
 
 
-def _replace(path: _Path, write: Callable[[int], None]) -> None:
+def _mode_to_keep(target: str) -> int | None:
+    """Return the permissions the new file takes over, or `None` for the default.
+
+    An existing regular file keeps its permissions. A new file gets what any
+    newly created file would get (the process umask applies), and so does the
+    regular file that replaces a symbolic link: the link's own mode says nothing.
+    """
+    try:
+        found = os.lstat(target).st_mode
+    except FileNotFoundError:
+        return None
+    return stat.S_IMODE(found) if stat.S_ISREG(found) else None
+
+
+def _replace(path: _Path, write: Callable[[int], None], *, durable: bool) -> None:
     """Write through `write` into a temporary file and rename it over `path`."""
+    if not isinstance(durable, bool):
+        message = f"durable must be True or False, not {type(durable).__name__}"
+        raise TypeError(message)
     target = os.fspath(path)
     if not isinstance(target, str):
         message = f"path must be text or a text path, not {type(target).__name__}"
@@ -104,17 +123,7 @@ def _replace(path: _Path, write: Callable[[int], None]) -> None:
         message = f"not a file path: {target!r}"
         raise ValueError(message)
     directory = directory or "."
-    # An existing regular file keeps its permissions. A new file gets what any
-    # newly created file would get (the process umask applies), and so does the
-    # regular file that replaces a symbolic link: the link's own mode says nothing.
-    mode: int | None = None
-    try:
-        found = os.lstat(target).st_mode
-    except FileNotFoundError:
-        pass
-    else:
-        if stat.S_ISREG(found):
-            mode = stat.S_IMODE(found)
+    mode = _mode_to_keep(target)
     temporary = os.path.join(directory, f".{name}.{secrets.token_hex(8)}.tmp")
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o666)
     try:
@@ -122,7 +131,8 @@ def _replace(path: _Path, write: Callable[[int], None]) -> None:
             if mode is not None:
                 os.fchmod(descriptor, mode)
             write(descriptor)
-            os.fsync(descriptor)
+            if durable:
+                os.fsync(descriptor)
         finally:
             os.close(descriptor)
         os.replace(temporary, target)
@@ -132,17 +142,32 @@ def _replace(path: _Path, write: Callable[[int], None]) -> None:
         except FileNotFoundError:
             pass
         raise
-    _sync_directory(directory)
+    if durable:
+        _sync_directory(directory)
 
 
-def write_bytes_atomic(path: _Path, data: bytes | bytearray | memoryview) -> None:
+def write_bytes_atomic(path: _Path, data: bytes | bytearray | memoryview, *, durable: bool = True) -> None:
     """Replace the file at `path` with `data` in one step.
 
-    The directory must exist. An existing file keeps its permissions; a
-    symbolic link at `path` is replaced by a regular file, its target is left
-    alone. When writing fails, `path` is unchanged and no temporary file stays
-    behind. Only a crash of the whole process can leave a temporary file,
-    named `.<name>.<random>.tmp`, beside the unchanged target.
+    The directory must exist; it is not created. When writing fails, `path`
+    is unchanged and no temporary file stays behind. Only a crash of the whole
+    process can leave a temporary file, named `.<name>.<random>.tmp`, beside
+    the unchanged target.
+
+    Permissions: an existing file keeps its permissions. A new file gets the
+    permissions of any newly created file, so the process umask decides who
+    can read it (mode 644 under umask 022); no file is made private for the
+    caller. A symbolic link at `path` is replaced by a regular file with the
+    permissions of a new file, its target is left alone.
+
+    `durable=True` flushes the file to disk before the rename and the
+    directory after it, so the new content survives a power failure or a crash
+    of the operating system once the call has returned. `durable=False`
+    leaves out both flushes and is much faster on a disk. It is not
+    crash-safe: the rename is still one step for every reader and after a
+    failed write, but after a power failure or a crash of the operating system
+    the target can hold the old content, the new content, or an empty or
+    incomplete file. Use it only for files that can be made again.
     """
     if not isinstance(data, (bytes, bytearray, memoryview)):
         message = f"write_bytes_atomic needs bytes, not {type(data).__name__}"
@@ -154,29 +179,33 @@ def write_bytes_atomic(path: _Path, data: bytes | bytearray | memoryview) -> Non
         while written < len(view):
             written += os.write(descriptor, view[written:])
 
-    _replace(path, write)
+    _replace(path, write, durable=durable)
 
 
-def write_text_atomic(path: _Path, text: str) -> None:
+def write_text_atomic(path: _Path, text: str, *, durable: bool = True) -> None:
     """Replace the file at `path` with `text` as UTF-8 in one step.
 
     Line endings are written as given. See `write_bytes_atomic` for what
-    "in one step" guarantees.
+    "in one step" guarantees, for the permissions of the file and for
+    `durable`.
     """
     if not isinstance(text, str):
         message = f"write_text_atomic needs text, not {type(text).__name__}"
         raise TypeError(message)
-    write_bytes_atomic(path, text.encode("utf-8"))
+    write_bytes_atomic(path, text.encode("utf-8"), durable=durable)
 
 
-def write_json(path: _Path, value: JsonValue, *, indent: int | None = 2, sort_keys: bool = True) -> None:
+def write_json(
+    path: _Path, value: JsonValue, *, indent: int | None = 2, sort_keys: bool = True, durable: bool = True
+) -> None:
     """Replace the file at `path` with `value` as UTF-8 JSON in one step.
 
     The document ends with a newline; non-ASCII text is written as itself, not
     escaped. A value JSON cannot represent is refused before anything is
     written: NaN and the two infinities raise `ValueError`, a value of a type
     JSON does not have raises `TypeError`. See `write_bytes_atomic` for what
-    "in one step" guarantees.
+    "in one step" guarantees, for the permissions of the file and for
+    `durable`.
     """
     text = json.dumps(value, indent=indent, sort_keys=sort_keys, ensure_ascii=False, allow_nan=False)
-    write_text_atomic(path, text + "\n")
+    write_text_atomic(path, text + "\n", durable=durable)
