@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+
+# Declared exceptions of this repository. Every standard binds every file; an
+# exception names one file, one rule, a reason and an expiry at most 90 days
+# ahead. `tools/check_exceptions.py` runs in the gate and fails when an entry
+# has expired, when its file is gone or passes the check again, and when
+# `ruff.toml` leaves a file out of the lint without an entry here.
+#
+# The list of the standards engine in `.standards.yaml` accepts the engine's
+# own rules only, so exceptions to this repository's checks live here.
+#
+# Rule `python-lint`: the file is left out of `ruff check` and `ruff format`.
+#
+# The three files below are written by the standards engine and stay the
+# engine's: this repository does not edit them. They fail the lint of the
+# Python template the engine itself ships. The entries end when the engine
+# ships them clean:
+#   https://github.com/cordanaLLM/praetor/issues/1204 (the three files)
+#   https://github.com/cordanaLLM/praetor/issues/1205 (the template target)
+
+[[exception]]
+file = ".config/agent/hooks/block_evasion.py"
+rule = "python-lint"
+reason = "Engine-written hook; fails lint and format. Ends with https://github.com/cordanaLLM/praetor/issues/1204"
+expires = 2027-01-09
+
+[[exception]]
+file = ".config/lefthook/scripts/checkpoint.py"
+rule = "python-lint"
+reason = "Engine-written hook; fails lint and format. Ends with https://github.com/cordanaLLM/praetor/issues/1204"
+expires = 2027-01-09
+
+[[exception]]
+file = ".config/lefthook/scripts/common.py"
+rule = "python-lint"
+reason = "Engine-written hook; fails lint and format, and a local fix makes the engine report its checkpoint lifecycle unavailable. Ends with https://github.com/cordanaLLM/praetor/issues/1204"
+expires = 2027-01-09

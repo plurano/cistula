@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+
+# Lint and format configuration. It is a file of its own, not a table in
+# pyproject.toml, because the Python flavor of the standards engine requires
+# `ruff.toml`. The engine's template for it is not used: it targets Python
+# 3.14, and this library supports 3.12 (cordanaLLM/praetor#1205).
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+
+# Exact paths, never a directory or a pattern. Each one has an entry with a
+# reason and an expiry in exceptions.toml; the gate fails when the two lists
+# differ (tools/check_exceptions.py).
+extend-exclude = [
+    ".config/agent/hooks/block_evasion.py",
+    ".config/lefthook/scripts/checkpoint.py",
+    ".config/lefthook/scripts/common.py",
+]
+
+[lint]
+select = ["ALL"]
+ignore = [
+    "COM812", # the formatter owns trailing commas
+    "D203",   # conflicts with D211 (no blank line before a class docstring)
+    "D213",   # conflicts with D212 (summary on the first docstring line)
+    "PTH",    # paths are accepted as text or os.PathLike and handled with os functions on purpose
+    "SIM105", # try/except/pass stays visible instead of contextlib.suppress
+]
+
+# The copyright rule reads the REUSE header every source file starts with.
+[lint.flake8-copyright]
+notice-rgx = "SPDX-FileCopyrightText: \\d{4} "
+
+[lint.per-file-ignores]
+"tests/*" = [
+    "ANN401",  # refused arguments are passed with deliberately wrong types
+    "D",       # tests are named, not documented
+    "INP001",  # tests are not a package
+    "PLR2004", # expected values are written out
+    "S101",    # pytest uses assert
+    "S603",    # tests start their own planted children
+]
+"tools/*" = [
+    "INP001", # gate scripts are not a package
+]

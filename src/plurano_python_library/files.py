@@ -1,0 +1,176 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+"""Read JSON strictly and write files so that a reader never sees half of one.
+
+The readers decode UTF-8 and refuse an object that names the same key twice,
+which the standard library accepts silently by keeping the last value. The
+writers put the new content into a temporary file beside the target, flush it
+to disk and rename it over the target in one step: after a failure or a crash
+the target holds either the old content or the new, never a mixture.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import secrets
+import stat
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+__all__ = [
+    "DuplicateKeyError",
+    "JsonValue",
+    "loads_json",
+    "read_json",
+    "write_bytes_atomic",
+    "write_json",
+    "write_text_atomic",
+]
+
+type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
+
+type _Path = str | os.PathLike[str]
+
+
+class DuplicateKeyError(ValueError):
+    """A JSON object names the same key more than once."""
+
+    def __init__(self, key: str) -> None:
+        """Record the repeated `key`."""
+        super().__init__(f"duplicate key in JSON object: {key!r}")
+        self.key = key
+
+
+def _unique(pairs: list[tuple[str, JsonValue]]) -> dict[str, JsonValue]:
+    found: dict[str, JsonValue] = {}
+    for key, value in pairs:
+        if key in found:
+            raise DuplicateKeyError(key)
+        found[key] = value
+    return found
+
+
+def loads_json(text: str, *, unique_keys: bool = True) -> JsonValue:
+    """Parse a JSON document; an object with a repeated key raises `DuplicateKeyError`.
+
+    `unique_keys=False` restores the standard library's behaviour of keeping
+    the last value. Everything else is `json.loads`: malformed text raises
+    `json.JSONDecodeError`. Both errors are `ValueError`.
+    """
+    if not isinstance(text, str):
+        message = f"loads_json needs text, not {type(text).__name__}; read_json reads a file"
+        raise TypeError(message)
+    hook = _unique if unique_keys else None
+    return cast("JsonValue", json.loads(text, object_pairs_hook=hook))
+
+
+def read_json(path: _Path, *, unique_keys: bool = True) -> JsonValue:
+    """Read a UTF-8 JSON file; an object with a repeated key raises `DuplicateKeyError`.
+
+    Bytes that are not UTF-8 raise `UnicodeDecodeError`, malformed JSON
+    (including a byte-order mark) raises `json.JSONDecodeError`; like
+    `DuplicateKeyError`, both are `ValueError`. A missing or unreadable file raises
+    `OSError`.
+    """
+    with open(path, "rb") as handle:
+        text = handle.read().decode("utf-8")
+    return loads_json(text, unique_keys=unique_keys)
+
+
+def _sync_directory(directory: str) -> None:
+    """Flush the directory entry of a renamed file to disk."""
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _replace(path: _Path, write: Callable[[int], None]) -> None:
+    """Write through `write` into a temporary file and rename it over `path`."""
+    target = os.fspath(path)
+    if not isinstance(target, str):
+        message = f"path must be text or a text path, not {type(target).__name__}"
+        raise TypeError(message)
+    directory, name = os.path.split(target)
+    if not name:
+        message = f"not a file path: {target!r}"
+        raise ValueError(message)
+    directory = directory or "."
+    # An existing regular file keeps its permissions. A new file gets what any
+    # newly created file would get (the process umask applies), and so does the
+    # regular file that replaces a symbolic link: the link's own mode says nothing.
+    mode: int | None = None
+    try:
+        found = os.lstat(target).st_mode
+    except FileNotFoundError:
+        pass
+    else:
+        if stat.S_ISREG(found):
+            mode = stat.S_IMODE(found)
+    temporary = os.path.join(directory, f".{name}.{secrets.token_hex(8)}.tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o666)
+    try:
+        try:
+            if mode is not None:
+                os.fchmod(descriptor, mode)
+            write(descriptor)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, target)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+    _sync_directory(directory)
+
+
+def write_bytes_atomic(path: _Path, data: bytes | bytearray | memoryview) -> None:
+    """Replace the file at `path` with `data` in one step.
+
+    The directory must exist. An existing file keeps its permissions; a
+    symbolic link at `path` is replaced by a regular file, its target is left
+    alone. When writing fails, `path` is unchanged and no temporary file stays
+    behind. Only a crash of the whole process can leave a temporary file,
+    named `.<name>.<random>.tmp`, beside the unchanged target.
+    """
+    if not isinstance(data, (bytes, bytearray, memoryview)):
+        message = f"write_bytes_atomic needs bytes, not {type(data).__name__}"
+        raise TypeError(message)
+    view = memoryview(data).cast("B")
+
+    def write(descriptor: int) -> None:
+        written = 0
+        while written < len(view):
+            written += os.write(descriptor, view[written:])
+
+    _replace(path, write)
+
+
+def write_text_atomic(path: _Path, text: str) -> None:
+    """Replace the file at `path` with `text` as UTF-8 in one step.
+
+    Line endings are written as given. See `write_bytes_atomic` for what
+    "in one step" guarantees.
+    """
+    if not isinstance(text, str):
+        message = f"write_text_atomic needs text, not {type(text).__name__}"
+        raise TypeError(message)
+    write_bytes_atomic(path, text.encode("utf-8"))
+
+
+def write_json(path: _Path, value: JsonValue, *, indent: int | None = 2, sort_keys: bool = True) -> None:
+    """Replace the file at `path` with `value` as UTF-8 JSON in one step.
+
+    The document ends with a newline; non-ASCII text is written as itself, not
+    escaped. A value JSON cannot represent raises `TypeError` before anything
+    is written. See `write_bytes_atomic` for what "in one step" guarantees.
+    """
+    text = json.dumps(value, indent=indent, sort_keys=sort_keys, ensure_ascii=False)
+    write_text_atomic(path, text + "\n")

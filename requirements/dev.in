@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# Every tool the gate installs into its environments, one exact pin each; the
+# library itself has no runtime dependency. dev.txt is the lock compiled from
+# this file: all packages with hashes. Change a pin here, then regenerate the
+# lock with `make lock`, which runs the command recorded in the dev.txt
+# header. A pin is at least three days old when it is adopted; `make lock`
+# enforces that with --exclude-newer.
+#
+# The licence check (reuse) is not here: its only wheel is built for one
+# interpreter version, and installing its source distribution would run a
+# build outside this lock. The Makefile takes it from PATH (REUSE).
+build==1.6.1
+coverage==7.16.2
+mypy==2.4.0
+pytest==9.1.1
+ruff==0.16.10
+setuptools==84.0.0

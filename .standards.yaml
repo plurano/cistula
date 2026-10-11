@@ -1,0 +1,41 @@
+---
+version: 1
+repository:
+  owner: plurano
+  name: python-library
+  visibility: private
+  description: Shared Python helpers of the Plurano framework family (working name)
+  homepage: ""
+  topics: []
+profiles:
+  - framework
+facets:
+  - security:high
+  - api:public-contract
+  - agent:sandboxed
+# Stand-in: the engine has no flavor for a Python library yet
+# (cordanaLLM/praetor#67). python-ml is the nearest one; re-adopt when the
+# library flavor lands.
+flavors:
+  - name: python-ml
+register:
+  sources:
+    expected: 13
+    sha256:
+      sha256:21731aeac3c2442a4eb28abd0593ab59cb453db34c8937c0b268c70d219141aa
+    inputs:
+      - path: .paperclip/harness.json
+        surface: prompts
+        kind: message
+        format: json
+        selector: operating_contract.*
+      - path: .paperclip/harness.json
+        surface: prompts
+        kind: message
+        format: json
+        selector: invariants.*
+exceptions:
+  - rule: HISS-11
+    path: .github/workflows/release.yml
+    reason: adoption found the release workflows short of the declared supply chain (SLSA Build Level 3 declared, Level 0 measured; enforce_cosign without a cosign signing step; require_sbom without an SBOM step); raise them as docs/guides/releasing.md in Praetor describes, then remove this entry
+    expires: "2027-01-09"

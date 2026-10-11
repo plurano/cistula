@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+"""Shared Python helpers of the Plurano framework family (working name).
+
+Three modules, standard library only, none of which contacts a network:
+
+- `process`: run a child process under a required time limit.
+- `files`: strict JSON reading and atomic file writing.
+- `digest`: SHA-256 digests.
+"""
+
+from __future__ import annotations
+
+from plurano_python_library.digest import sha256_bytes, sha256_file, sha256_text
+from plurano_python_library.files import (
+    DuplicateKeyError,
+    JsonValue,
+    loads_json,
+    read_json,
+    write_bytes_atomic,
+    write_json,
+    write_text_atomic,
+)
+from plurano_python_library.process import (
+    CommandFailedError,
+    CommandNotFoundError,
+    CommandNotStartedError,
+    CommandTimeoutError,
+    ProcessError,
+    Result,
+    child_env,
+    run,
+)
+
+__all__ = [
+    "CommandFailedError",
+    "CommandNotFoundError",
+    "CommandNotStartedError",
+    "CommandTimeoutError",
+    "DuplicateKeyError",
+    "JsonValue",
+    "ProcessError",
+    "Result",
+    "child_env",
+    "loads_json",
+    "read_json",
+    "run",
+    "sha256_bytes",
+    "sha256_file",
+    "sha256_text",
+    "write_bytes_atomic",
+    "write_json",
+    "write_text_atomic",
+]
