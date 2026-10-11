@@ -113,8 +113,16 @@ make verify-all
 
 This is the whole gate, and CI runs the same target. It needs `python3.12`,
 `python3.13` and `python3.14` on `PATH` (or `PYTHONS="..."` with full paths),
-`reuse` 6.2.0 and `praetorctl`, the command of the standards engine. An
-interpreter or a tool that is missing fails the gate.
+`reuse` 6.2.0 and the standards engine. An interpreter or a tool that is
+missing fails the gate.
+
+The engine is the commit that `PRAETOR_REF` in
+[ci.yml](.github/workflows/ci.yml) pins, for the gate and for the Git hooks
+alike. [.config/lefthook/engine.sh](.config/lefthook/engine.sh) installs it
+once per pin with `go install` and fails when it cannot; a `praetorctl` on
+`PATH` is not used in its place. `make praetor-engine-path` prints the binary
+in use, and the gate stops at its first step (`make verify-engine-pin`) when
+no workflow declares the pin.
 
 1. One environment per interpreter is installed from `requirements/dev.txt`.
    Every package is pinned by hash; nothing else is installed.

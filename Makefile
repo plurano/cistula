@@ -31,18 +31,29 @@ export SOURCE_DATE_EPOCH
 # from running side by side.
 .NOTPARALLEL:
 
-.PHONY: verify-all verify fetch environment verify-static package verify-reproducible verify-python lock clean
+.PHONY: verify-all verify-engine-pin verify fetch environment verify-static package verify-reproducible verify-python lock clean
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. It runs this
 # repository's own checks first and then the standards engine: the agent
 # contexts equal AGENTS.md, the register of the configured texts, the audit.
-# Praetor ships one binary under two names; whichever is installed is used.
+#
+# The engine is the commit that PRAETOR_REF in .github/workflows/ci.yml pins.
+# The file included in line 3 asks the hook launcher for that binary, so the
+# gate and the Git hooks run the same engine. Without a pin the launcher runs
+# whatever engine is on PATH and says so in one line only;
+# `verify-engine-pin` turns that into a failure before anything else runs.
+# The line below serves only a tree without the launcher.
 PRAETORCTL ?= $(shell command -v praetorctl 2>/dev/null || command -v standardsctl 2>/dev/null || echo praetorctl)
-verify-all: verify
+verify-all: verify-engine-pin verify
 	@$(PRAETORCTL) compile-context --verify
 	@$(PRAETORCTL) caveman check --configured-sources
 	@$(PRAETORCTL) audit
+
+# The pattern is the one the launcher reads the pin with.
+verify-engine-pin:
+	@grep -Eqs '^[[:space:]]*PRAETOR_REF[[:space:]]*[:=]' .github/workflows/*.yml .github/workflows/*.yaml || { \
+		printf '%s\n' 'FAIL: no workflow declares PRAETOR_REF, so no engine is pinned.' >&2; exit 1; }
 
 # This repository's own checks; they need no engine. `fetch` is the only step
 # that reaches the package index; everything after it runs without a network.

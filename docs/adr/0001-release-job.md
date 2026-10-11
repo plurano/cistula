@@ -87,8 +87,9 @@ The split is what the standards engine measures as SLSA Build Level 3: the
 build runs in a reusable workflow of this repository, in the job that also
 attests it, and nothing is downloaded into that job before the attestation
 (engine guide `docs/guides/releasing.md` at the commit that
-`PRAETOR_COMMIT` in [ci.yml](../../.github/workflows/ci.yml) pins). It is built in from the start
-so that the build path does not change when signing is added.
+`PRAETOR_REF` in [ci.yml](../../.github/workflows/ci.yml) pins). It is built
+in from the start so that the build path does not change when signing is
+added.
 
 Steps of the one job in `release-build.yml`, in order:
 
