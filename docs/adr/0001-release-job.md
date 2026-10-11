@@ -94,7 +94,7 @@ added.
 Steps of the one job in `release-build.yml`, in order:
 
 1. Check out with full history and without stored credentials; install the
-   three interpreters as `ci.yml` does.
+   supported interpreters as `ci.yml` does.
 2. On a tag: refuse unless the tag is `v` plus the `version` of
    `pyproject.toml`, and unless the tagged commit is an ancestor of
    `origin/main`.

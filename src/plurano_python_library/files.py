@@ -21,7 +21,7 @@ import math
 import os
 import secrets
 import stat
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeAlias, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -36,9 +36,10 @@ __all__ = [
     "write_text_atomic",
 ]
 
-type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
+# Not `type` statements: Python 3.11 does not have them.
+JsonValue: TypeAlias = bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"] | None
 
-type _Path = str | os.PathLike[str]
+_Path: TypeAlias = str | os.PathLike[str]
 
 
 class DuplicateKeyError(ValueError):

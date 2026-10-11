@@ -101,7 +101,7 @@ write_json("record.json", record)
 - When the whole process is killed between write and replace, the old file is
   whole, but the temporary file `.<name>.<16 hex digits>.tmp` stays in the
   directory.
-- Python 3.12 or newer.
+- Python 3.11 or newer.
 
 ## Installing
 
@@ -131,8 +131,8 @@ that commit, and a second build of it must print the same
 make verify-all
 ```
 
-This is the whole gate, and CI runs the same target. It needs `python3.12`,
-`python3.13` and `python3.14` on `PATH` (or `PYTHONS="..."` with full paths),
+This is the whole gate, and CI runs the same target. It needs `python3.11`,
+`python3.12`, `python3.13` and `python3.14` on `PATH` (or `PYTHONS="..."` with full paths),
 `reuse` 6.2.0 and the standards engine. An interpreter or a tool that is
 missing fails the gate.
 
@@ -146,8 +146,8 @@ no workflow declares the pin.
 
 1. One environment per interpreter is installed from `requirements/dev.txt`.
    Every package is pinned by hash; nothing else is installed.
-2. Format, lint, types, licence headers and the exception list are checked
-   once.
+2. Format, lint, types, licence headers, the exception list and the list of
+   supported Python versions are checked once.
 3. One source distribution and one wheel are built.
 4. Every interpreter builds both once more. One differing byte fails.
 5. The wheel of step 3 is installed into each environment, and the tests run
@@ -194,6 +194,18 @@ Two limits:
 - A pull request run in CI builds the forge's test merge commit, which has
   its own date. Its hashes are not those of the branch. The hashes of a build
   on the main branch or on a tag are the ones to compare and to pin.
+
+### Supported Python versions
+
+The classifiers in [pyproject.toml](pyproject.toml) are the list; the oldest
+version is the floor. Every version on it is tested: `PYTHONS` in the
+[Makefile](Makefile) and the interpreter list in
+[ci.yml](.github/workflows/ci.yml) name the same versions, and
+`requires-python`, the lint target in [ruff.toml](ruff.toml), `python_version`
+of the type check and the lock are set to the floor.
+[tools/check_python_versions.py](tools/check_python_versions.py) fails the
+gate when one of these places disagrees, so adding or dropping a version means
+changing all of them in one commit, and then `make lock`.
 
 ### Exceptions
 

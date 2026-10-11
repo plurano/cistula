@@ -15,7 +15,7 @@ name = "plurano-python-library"
 version = "0.1.0.dev0"
 description = "Shared Python helpers of the Plurano framework family (working name)."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 license = "EUPL-1.2"
 license-files = ["LICENSE"]
 authors = [{ name = "Lusoris", email = "lusoris@proton.me" }]
@@ -24,6 +24,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Operating System :: POSIX",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -42,7 +43,7 @@ plurano_python_library = ["py.typed"]
 
 [tool.mypy]
 strict = true
-python_version = "3.12"
+python_version = "3.11"
 files = ["src", "tests", "tools"]
 # Not enabled: warn_unreachable and redundant-expr. The public functions refuse
 # arguments of the wrong type at run time, for callers that run no type

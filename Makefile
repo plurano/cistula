@@ -7,7 +7,7 @@ SHELL := /bin/sh
 # Interpreters the gate runs on: the supported floor and every newer release.
 # A name is looked up on PATH; a full path works as well. An interpreter that
 # is missing fails the gate, it is never skipped.
-PYTHONS ?= python3.12 python3.13 python3.14
+PYTHONS ?= python3.11 python3.12 python3.13 python3.14
 
 # The interpreter of the targets that work on one version.
 PYTHON ?= $(firstword $(PYTHONS))
@@ -61,7 +61,7 @@ verify: fetch verify-static package verify-reproducible
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory verify-python PYTHON="$$python"; \
 	done
-	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, package, same bytes from a second build, and its tests on $(PYTHONS).'
+	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Python versions, package, same bytes from a second build, and its tests on $(PYTHONS).'
 
 fetch:
 	@set -e; for python in $(PYTHONS); do \
@@ -81,14 +81,17 @@ $(ENV)/.locked: requirements/dev.txt
 
 # Checks that read the source and do not depend on the interpreter running the
 # tests: once, on the first interpreter. The lint leaves out exactly the files
-# ruff.toml names; the last step fails when one of them has no entry in
-# exceptions.toml, or when an entry has expired or is no longer needed.
+# ruff.toml names; the step after the licence check fails when one of them has
+# no entry in exceptions.toml, or when an entry has expired or is no longer
+# needed. The last step fails when the metadata, the lint, the type check, the
+# lock, PYTHONS above or the CI workflow name different Python versions.
 verify-static: environment
 	'$(ENV)/bin/ruff' format --check .
 	'$(ENV)/bin/ruff' check .
 	'$(ENV)/bin/mypy'
 	$(REUSE) lint
 	'$(ENV)/bin/python' tools/check_exceptions.py
+	'$(ENV)/bin/python' tools/check_python_versions.py
 
 # One source distribution and one wheel, built once with the locked build
 # backend on the first interpreter. Every interpreter then tests this one
@@ -133,7 +136,7 @@ verify-python: environment
 # Regenerates the lock from requirements/dev.in. A release younger than three
 # days is not eligible.
 lock:
-	cd requirements && uv pip compile --universal --generate-hashes --python-version=3.12 \
+	cd requirements && uv pip compile --universal --generate-hashes --python-version=3.11 \
 		--exclude-newer="$$(date -u -d '3 days ago' +%Y-%m-%dT00:00:00Z)" \
 		dev.in --output-file=dev.txt
 

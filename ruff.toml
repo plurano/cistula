@@ -4,9 +4,9 @@
 # Lint and format configuration. It is a file of its own, not a table in
 # pyproject.toml, because the Python flavor of the standards engine requires
 # `ruff.toml`. The engine's template for it is not used: it targets Python
-# 3.14, and this library supports 3.12 (cordanaLLM/praetor#1205).
+# 3.14, and this library supports 3.11 (cordanaLLM/praetor#1205).
 line-length = 120
-target-version = "py312"
+target-version = "py311"
 src = ["src", "tests"]
 
 # Exact paths, never a directory or a pattern. Each one has an entry with a
