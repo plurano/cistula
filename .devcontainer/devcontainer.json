@@ -1,5 +1,5 @@
 {
-  "name": "plurano/python-library",
+  "name": "plurano/cistula",
   "build": {
     "dockerfile": "Dockerfile.praetor",
     "context": "."

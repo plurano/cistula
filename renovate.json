@@ -5,5 +5,16 @@
   ],
   "extends": [
     "github>plurano/horistes"
+  ],
+  "packageRules": [
+    {
+      "description": "praetor-managed files: praetorctl adopt ships their updates and praetorctl audit locks them byte for byte",
+      "matchFileNames": [
+        ".devcontainer/devcontainer.json",
+        ".devcontainer/Dockerfile.praetor",
+        ".github/workflows/reuse.yml"
+      ],
+      "enabled": false
+    }
   ]
 }

@@ -1,4 +1,4 @@
-# Paperclip Operating Rules (plurano/python-library)
+# Paperclip Operating Rules (plurano/cistula)
 
 ## Operating Contract
 

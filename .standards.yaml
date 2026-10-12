@@ -2,9 +2,9 @@
 version: 1
 repository:
   owner: plurano
-  name: python-library
+  name: cistula
   visibility: private
-  description: Shared Python helpers of the Plurano framework family (working name)
+  description: Shared Python helpers of the Plurano framework family
   homepage: ""
   topics: []
 profiles:

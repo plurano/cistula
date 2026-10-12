@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from plurano_python_library import process
-from plurano_python_library.process import (
+from cistula import process
+from cistula.process import (
     CommandFailedError,
     CommandNotFoundError,
     CommandNotStartedError,

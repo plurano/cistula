@@ -129,7 +129,7 @@ verify-python: environment
 	'$(ENV)/bin/python' -VV
 	'$(ENV)/bin/python' -m pip install --disable-pip-version-check --no-index --no-deps \
 		--force-reinstall dist/*.whl
-	'$(ENV)/bin/python' -I -c 'import plurano_python_library as p; print(p.__file__); assert "site-packages" in p.__file__'
+	'$(ENV)/bin/python' -I -c 'import cistula as p; print(p.__file__); assert "site-packages" in p.__file__'
 	COVERAGE_FILE='$(ENV)/coverage' '$(ENV)/bin/python' -m coverage run -m pytest
 	COVERAGE_FILE='$(ENV)/coverage' '$(ENV)/bin/python' -m coverage report
 

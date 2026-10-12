@@ -1,4 +1,4 @@
-# Plurano Python library (working name)
+# Cistula
 
 <!-- praetor:readme-governance:start -->
 [![HISS Adopted][praetor-hiss-badge]][praetor-hiss-agents]
@@ -19,7 +19,7 @@ generated agent context against `AGENTS.md`.
 0 recorded infractions; audit forbids growth.
 
 [praetor-hiss-badge]: https://img.shields.io/badge/Standards-HISS%20Adopted-blue
-[praetor-hiss-agents]: https://github.com/plurano/python-library/blob/HEAD/AGENTS.md
+[praetor-hiss-agents]: https://github.com/plurano/cistula/blob/HEAD/AGENTS.md
 <!-- praetor:readme-governance:end -->
 
 Shared Python helpers of the Plurano framework family: one tested
@@ -27,9 +27,10 @@ implementation of the helpers that every repository used to repeat.
 
 ## Name
 
-`python-library` is a working name, and so are the distribution name
-`plurano-python-library` and the import name `plurano_python_library`. The real
-name is chosen before the first release; both names change with it.
+Cistula (pronounced KIS-tu-la) is Latin for a small chest: the case that held
+a craftsman's or a scribe's small tools. The word is the diminutive of *cista*,
+from Greek *kiste*. The repository, the distribution and the import package
+all carry the name `cistula`.
 
 ## Status
 
@@ -47,7 +48,7 @@ network.
 | `digest` | `sha256_file`, `sha256_bytes` and `sha256_text`. |
 
 ```python
-from plurano_python_library import read_json, run, sha256_file, write_json
+from cistula import read_json, run, sha256_file, write_json
 
 result = run(["git", "rev-parse", "HEAD"], timeout=30, check=True)
 record = read_json("record.json")
@@ -164,7 +165,7 @@ pip install --require-hashes -r requirements.txt
 with this line in the consumer's `requirements.txt`:
 
 ```text
-plurano-python-library @ file:///path/to/dist/plurano_python_library-0.1.0.dev0-py3-none-any.whl --hash=sha256:<hash printed by make package>
+cistula @ file:///path/to/dist/cistula-0.1.0.dev0-py3-none-any.whl --hash=sha256:<hash printed by make package>
 ```
 
 The bytes of the wheel and of the source distribution depend on the commit
