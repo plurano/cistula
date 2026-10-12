@@ -1,0 +1,182 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+# Release: a version tag builds the release files in the release builder,
+# reads them back the way a consumer does, uploads the wheel and the source
+# distribution to PyPI by trusted publishing and stores every release file in
+# a draft release on the forge. A person publishes the draft. A manual run is
+# a dry run: it builds the files, signs nothing and publishes nothing
+# (docs/adr/0001-release-job.md).
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the release files
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release-build.yml
+    with:
+      sign: ${{ startsWith(github.ref, 'refs/tags/v') }}
+
+  # Reads the files back without the builder's rights. Each check runs twice:
+  # on the file as built, which has to pass, and on a copy with one planted
+  # defect, which has to be refused. A check that accepts its plant fails the
+  # release.
+  verify:
+    name: Read the release files back
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      attestations: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BUILDER: ${{ github.repository }}/.github/workflows/release-build.yml
+      SIGNER: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/release-build.yml@${{ github.ref }}
+      ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      - name: Fetch the release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: dist
+
+      - name: Every file matches its checksum
+        working-directory: dist
+        run: sha256sum --check --strict SHA256SUMS
+
+      - name: The checksums are signed by the release builder
+        run: |
+          cosign verify-blob \
+            --certificate-identity "$SIGNER" \
+            --certificate-oidc-issuer "$ISSUER" \
+            --bundle dist/SHA256SUMS.sigstore.json \
+            dist/SHA256SUMS
+
+      - name: Changed checksums are refused
+        run: |
+          cp dist/SHA256SUMS planted-checksums.txt
+          printf 'planted\n' >> planted-checksums.txt
+          if cosign verify-blob \
+            --certificate-identity "$SIGNER" \
+            --certificate-oidc-issuer "$ISSUER" \
+            --bundle dist/SHA256SUMS.sigstore.json \
+            planted-checksums.txt; then
+            echo "FAIL: changed checksums passed the signature check" >&2
+            exit 1
+          fi
+
+      - name: A signature by another workflow is refused
+        run: |
+          if cosign verify-blob \
+            --certificate-identity "${SIGNER/release-build.yml/release.yml}" \
+            --certificate-oidc-issuer "$ISSUER" \
+            --bundle dist/SHA256SUMS.sigstore.json \
+            dist/SHA256SUMS; then
+            echo "FAIL: the signature passed for a workflow that did not sign" >&2
+            exit 1
+          fi
+
+      - name: Every file carries provenance from the release builder
+        run: |
+          while read -r _ name; do
+            gh attestation verify "dist/${name}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$BUILDER" \
+              --source-ref "$GITHUB_REF"
+          done < dist/SHA256SUMS
+
+      - name: A changed file carries no provenance
+        run: |
+          read -r _ name < dist/SHA256SUMS
+          cp "dist/${name}" planted-file
+          printf 'planted\n' >> planted-file
+          if gh attestation verify planted-file \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$BUILDER" \
+            --source-ref "$GITHUB_REF"; then
+            echo "FAIL: a changed file passed the provenance check" >&2
+            exit 1
+          fi
+
+  # Only the two package files go to the index; the checksums, the bundle
+  # and the parts lists go to the forge release.
+  pypi:
+    name: Upload the packages to PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, verify]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/project/cistula/
+    permissions:
+      id-token: write
+    steps:
+      - name: Fetch the release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: dist
+
+      - name: Pick the two package files
+        run: |
+          mkdir pypi-dist
+          cp dist/*.whl dist/*.tar.gz pypi-dist/
+          files=(pypi-dist/*)
+          test "${#files[@]}" -eq 2
+
+      # PyPI does not accept a reusable workflow as a trusted publisher
+      # (https://docs.pypi.org/trusted-publishers/troubleshooting/), so the
+      # upload runs here and not in the release builder. The publisher on PyPI
+      # names this file and the environment above.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pypi-dist/
+
+  draft:
+    name: Store the files in a draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, verify, pypi]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Fetch the release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: dist
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" --draft --verify-tag --title "$TAG" \
+            --generate-notes dist/*

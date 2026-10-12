@@ -25,15 +25,18 @@ pin by hash. Four facts shape the job that builds it.
    (`visibility: private` in [.standards.yaml](../../.standards.yaml);
    `version` in [pyproject.toml](../../pyproject.toml)). The name `cistula`
    is chosen (fleet answer ledger, `python-library-name`, 2026-10-12) and is
-   final with the first release. Nothing is published before the first public
-   release, and that release and its place of publication are the operator's
-   decision (fleet answer ledger,
+   final with the first release. Nothing is published before the repository
+   turns public. The first release, version 0.1.0, follows that change and
+   goes to PyPI by trusted publishing and to a forge release (fleet answer
+   ledger, `python-library-first-release`, 2026-10-12; before it
    `python-library-release-precedent`, 2026-10-11).
 3. **The declared supply chain is ahead of the workflows.**
    [.config/archetypes/framework.yaml](../../.config/archetypes/framework.yaml)
    declares `slsa_level: 3`, `enforce_cosign: true` and `require_sbom: true`.
-   No release workflow exists yet, so `.standards.yaml` carries one HISS-11
-   exception for `.github/workflows/release.yml` that expires on 2027-01-09.
+   Until the change that adds the workflows below, `.standards.yaml` carried
+   one HISS-11 exception for `.github/workflows/release.yml`. That change
+   removes it: with the two workflows, the parts lists and the signing steps
+   in place, `praetorctl audit` reports the entry as excusing no gap.
 4. **Signing a private build has no place to go yet.** The forge's build
    attestations are not offered to private repositories on the current plan,
    and a keyless cosign signature writes the repository and workflow identity
@@ -82,8 +85,8 @@ release file is therefore a file the gate has built twice and tested.
 
 | File | Trigger | Content |
 | :--- | :--- | :--- |
-| `.github/workflows/release.yml` | manual run on `main`; from the first public release also the push of a tag `v*` | One job that calls the workflow below. `permissions: contents: read` |
-| `.github/workflows/release-build.yml` | `workflow_call` only | One job: the steps listed below |
+| `.github/workflows/release.yml` | Push of a tag `v*`; manual run (`workflow_dispatch`) | `build` calls the reusable workflow with input `sign` (`true` on tag, `false` on dispatch). On tags only: `verify`, `pypi`, and `draft` jobs. Top-level `permissions: contents: read` |
+| `.github/workflows/release-build.yml` | `workflow_call` with required boolean input `sign` | One job `build`: the steps listed below. `permissions: contents: read`, `id-token: write`, `attestations: write` |
 
 The split is what the standards engine measures as SLSA Build Level 3: the
 build runs in a reusable workflow of this repository, in the job that also
@@ -93,47 +96,71 @@ attests it, and nothing is downloaded into that job before the attestation
 in from the start so that the build path does not change when signing is
 added.
 
+PyPI does not accept a reusable workflow as a trusted publisher
+([PyPI troubleshooting page](https://docs.pypi.org/trusted-publishers/troubleshooting/)).
+The upload is therefore a job of
+[release.yml](../../.github/workflows/release.yml) itself, and the publisher
+registered on PyPI names that file and the environment `pypi`.
+
 Steps of the one job in `release-build.yml`, in order:
 
 1. Check out with full history and without stored credentials; install the
-   supported interpreters as `ci.yml` does.
+   supported interpreters as [ci.yml](../../.github/workflows/ci.yml) does.
 2. On a tag: refuse unless the tag is `v` plus the `version` of
-   `pyproject.toml`, and unless the tagged commit is an ancestor of
-   `origin/main`.
-3. `make verify`.
+   [pyproject.toml](../../pyproject.toml), and unless the tagged commit is an
+   ancestor of `origin/main`.
+3. `make verify REUSE="pipx run reuse==6.2.0"`.
 4. Write `SHA256SUMS` for the two files of `dist/` and print it into the run
-   summary.
-5. Write the parts lists of the two files with the syft action, as SPDX JSON
-   and as CycloneDX JSON (the two formats other fleet repositories emit).
-6. Private phase: print one line that says the files are **not signed and not
-   attested**, and why. Public phase: attest the build provenance of the two
-   files with the forge's attestation action, then sign `SHA256SUMS` with
-   keyless cosign into `SHA256SUMS.sigstore.json`.
-7. Keep `dist/`, `SHA256SUMS`, the parts lists and, in the public phase, the
-   bundle as artifacts of the run.
+   summary (`$GITHUB_STEP_SUMMARY`).
+5. Write the parts lists of the unpacked wheel with syft, as SPDX JSON
+   (`cistula-<v>.spdx.json`) and as CycloneDX JSON
+   (`cistula-<v>.cyclonedx.json`), the two formats other fleet repositories
+   emit.
+6. If `sign` is true: sign `SHA256SUMS` with keyless cosign into
+   `SHA256SUMS.sigstore.json`, and attest the build provenance of the two
+   files listed in it with the forge's attestation action. If `sign` is false
+   (dry run): print one notice that the files are not signed and not
+   attested.
+7. Hand `dist/` (`dist` files, `SHA256SUMS`, parts lists, and the bundle if
+   signed) to the calling workflow as artifact `release-files`.
 
 Every action is pinned by commit, and a release of an action younger than
 three days is not eligible, as for the packages of `requirements/dev.txt`.
 
 ### Private phase: a dry run
 
-Until the first public release the job publishes nothing: no forge release,
-no package index, no signature. Its result is the run's artifacts and the
-printed hashes. Step 6 states the missing signature in the log, so the gap is
-visible in every run and not only in this record.
-
-The HISS-11 exception stays for the private phase, with its reason narrowed to
-what is still missing (attestation and cosign signature), and is removed with
-the change that adds them. `praetorctl audit` decides whether a gap is left;
-an exception that names no gap fails the audit as stale.
+Until the first public release the workflow publishes nothing: no forge
+release, no package index, and no signature. A manual dispatch run on `main`
+runs the `build` job only, passing `sign: false`. The downstream jobs
+(`verify`, `pypi`, `draft`) are guarded to run on tag pushes only
+(`if: startsWith(github.ref, 'refs/tags/v')`), so a dispatch run produces only
+the unsigned run artifacts and the printed hashes. Step 6 states the missing
+signature in the log, so the gap is visible in every dry run and not only in
+this record.
 
 ### Public phase
 
-Decided with the first public release, not here: the final name, the version
-tag, forge release assets and a package index. Fixed here is only the shape:
-the same job, with step 6 signing, a draft forge release that is published as
-the last step after the bundle and the attestation verify, and these two
-checks for a consumer:
+The publication channels are decided (fleet answer ledger,
+`python-library-first-release`, 2026-10-12): the first release of `cistula`,
+version 0.1.0, follows the change of the repository to public. When a tag
+`v*` is pushed:
+
+1. `build` invokes [.github/workflows/release-build.yml](../../.github/workflows/release-build.yml)
+   with `sign: true`, building the package with `make verify`, writing
+   `SHA256SUMS`, generating Syft SBOMs, signing `SHA256SUMS` with Cosign, and
+   attesting build provenance.
+2. `verify` reads back the artifacts without builder privileges, checking
+   `SHA256SUMS`, verifying the Cosign signature and provenance attestations, and
+   verifying that planted defects in checksums, files, or signer workflow
+   identities are refused.
+3. `pypi` uploads only the built wheel and source distribution to PyPI via
+   trusted publishing under the `pypi` environment, using
+   `pypa/gh-action-pypi-publish`.
+4. `draft` creates a draft release on the forge with all release files
+   (distributions, `SHA256SUMS`, Cosign signature bundle, and SBOMs) for manual
+   review and publication by a maintainer.
+
+A consumer verifies the released files with these two checks:
 
 ```sh
 gh attestation verify <file> -R <owner>/<repository>
@@ -148,8 +175,9 @@ cosign verify-blob \
 Each point is settled by a run before this record is accepted, or with the
 change that adds the step.
 
-- Whether `praetorctl audit` credits the parts-list step and the two-workflow
-  shape while the signing steps are absent.
+- Whether a dry run on `main` and a tag run produce the files and the
+  notices described here; the first dry run after merging settles the build
+  half while the repository is private.
 - The certificate identity a signature made inside the called workflow
   carries; the command above assumes the called workflow's path at the tag.
   The check ships with a wrong identity that it refuses.
@@ -166,8 +194,7 @@ change that adds the step.
   correct. The step from the private to the public phase adds steps and
   changes none.
 - **Negative**: A private-phase build carries no signature; the hash and the
-  reproducible build are its only proof of origin. The repository keeps a
-  HISS-11 exception until the public phase. The files are stored
+  reproducible build are its only proof of origin. The files are stored
   uncompressed and are about five times and two and a half times as large as
   compressed ones (README, "No compression"). Run artifacts expire with the
   forge's retention time, so a pinned build is recovered by building the
