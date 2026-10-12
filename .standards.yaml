@@ -29,6 +29,12 @@ agent_clients:
   - claude
   - codex
   - gemini
+# One maintainer: the engine renders zero approvals, no code-owner review and
+# the repository admin role as pull-request bypass actor. Restore independent
+# review when a second maintainer or a review bot can approve.
+overrides:
+  branch_protection:
+    review_mode: single_maintainer
 register:
   sources:
     expected: 13
