@@ -25,4 +25,7 @@ below are the record of their terms.
 The upstream commits are the ones the engine's credits name (`docs/credits.yaml` in
 [cordanaLLM/praetor](https://github.com/cordanaLLM/praetor)). The caveman upstream moved to
 Apache-2.0 in its release 3.0.0; the skill was adapted before that change, under the MIT
-terms shipped here.
+terms shipped here. The caveman licence text opens with the upstream's scope note: it puts a
+set of runtime directories of that repository under the Business Source License 1.1. The
+upstream's `LICENSING.md` at that commit lists its `skills/` directory, where the skill came
+from, as MIT. The adapted skill copies no upstream text.
