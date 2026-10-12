@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from plurano_python_library.files import (
+from cistula.files import (
     DuplicateKeyError,
     loads_json,
     open_bytes_atomic,
@@ -31,13 +31,13 @@ from plurano_python_library.files import (
     write_json,
     write_text_atomic,
 )
-from plurano_python_library.process import run
+from cistula.process import run
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from plurano_python_library.files import JsonValue
+    from cistula.files import JsonValue
 
 TEMPORARY = re.compile(r"^\.(?P<name>.+)\.[0-9a-f]{16}\.tmp$")
 
@@ -1002,7 +1002,7 @@ def test_process_killed_between_write_and_replace_leaves_the_old_file_whole(tmp_
     # The child dies, without any clean-up, at the moment it would rename.
     code = """
 import os, signal, sys
-from plurano_python_library import files
+from cistula import files
 
 def die(*_):
     os.kill(os.getpid(), signal.SIGKILL)
@@ -1492,7 +1492,7 @@ def test_a_flush_that_fails_when_the_block_ends_leaves_the_old_file_whole(tmp_pa
     # buffer does not fit, and the error comes from the flush at the end of the block.
     code = """
 import errno, resource, sys
-from plurano_python_library import files
+from cistula import files
 
 resource.setrlimit(resource.RLIMIT_FSIZE, (4, resource.getrlimit(resource.RLIMIT_FSIZE)[1]))
 try:
@@ -1808,7 +1808,7 @@ with files.staged_path(sys.argv[1]) as temporary:
 def test_process_killed_inside_a_block_leaves_the_old_file_whole(tmp_path: Path, block: str) -> None:
     path = tmp_path / "survivor.txt"
     path.write_bytes(b"old content")
-    code = "import os, signal, sys\nfrom plurano_python_library import files\n" + KILLED_IN_A_BLOCK[block]
+    code = "import os, signal, sys\nfrom cistula import files\n" + KILLED_IN_A_BLOCK[block]
 
     done = subprocess.run([sys.executable, "-c", code, str(path)], check=False, timeout=60)
 

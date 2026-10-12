@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from plurano_python_library.digest import sha256_bytes, sha256_file, sha256_text
+from cistula.digest import sha256_bytes, sha256_file, sha256_text
 
 if TYPE_CHECKING:
     from pathlib import Path

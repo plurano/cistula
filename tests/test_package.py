@@ -8,8 +8,8 @@ import socket
 import subprocess
 import sys
 
-import plurano_python_library
-from plurano_python_library import digest, files, process
+import cistula
+from cistula import digest, files, process
 
 PUBLIC = {
     "CommandFailedError",
@@ -37,19 +37,19 @@ PUBLIC = {
 
 
 def test_public_interface_is_exactly_the_declared_one() -> None:
-    assert set(plurano_python_library.__all__) == PUBLIC
+    assert set(cistula.__all__) == PUBLIC
     assert set(digest.__all__) | set(files.__all__) | set(process.__all__) == PUBLIC
-    assert len(plurano_python_library.__all__) == len(PUBLIC)
+    assert len(cistula.__all__) == len(PUBLIC)
 
 
 def test_every_public_name_resolves_and_is_documented() -> None:
     for name in PUBLIC - {"JsonValue"}:
-        member = getattr(plurano_python_library, name)
+        member = getattr(cistula, name)
         assert inspect.getdoc(member), name
 
 
 def test_type_marker_is_shipped_with_the_package() -> None:
-    assert importlib.resources.files(plurano_python_library).joinpath("py.typed").is_file()
+    assert importlib.resources.files(cistula).joinpath("py.typed").is_file()
 
 
 def test_import_loads_no_network_module_and_no_third_party_module() -> None:
@@ -59,13 +59,13 @@ def test_import_loads_no_network_module_and_no_third_party_module() -> None:
     code = """
 import sys
 before = set(sys.modules)
-import plurano_python_library
+import cistula
 loaded = set(sys.modules) - before
 network = sorted(loaded & {"socket", "ssl", "http.client", "urllib.request", "asyncio"})
 outside = sorted(
     name for name in loaded
     if name.partition(".")[0] not in sys.stdlib_module_names
-    and not name.startswith("plurano_python_library")
+    and not name.startswith("cistula")
 )
 print(network, outside)
 """

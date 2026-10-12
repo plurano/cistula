@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
 # SPDX-License-Identifier: EUPL-1.2
-"""Shared Python helpers of the Plurano framework family (working name).
+"""Cistula: shared Python helpers of the Plurano framework family.
 
 Three modules, standard library only, none of which contacts a network:
 
@@ -11,8 +11,8 @@ Three modules, standard library only, none of which contacts a network:
 
 from __future__ import annotations
 
-from plurano_python_library.digest import sha256_bytes, sha256_file, sha256_text
-from plurano_python_library.files import (
+from cistula.digest import sha256_bytes, sha256_file, sha256_text
+from cistula.files import (
     DuplicateKeyError,
     JsonValue,
     loads_json,
@@ -24,7 +24,7 @@ from plurano_python_library.files import (
     write_json,
     write_text_atomic,
 )
-from plurano_python_library.process import (
+from cistula.process import (
     CommandFailedError,
     CommandNotFoundError,
     CommandNotStartedError,

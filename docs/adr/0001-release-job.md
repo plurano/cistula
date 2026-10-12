@@ -19,13 +19,15 @@ pin by hash. Four facts shape the job that builds it.
    Measured across hosts for commit `02ae449`: the run on `main` and a local
    build on another distribution and interpreter patch version print the same
    two hashes
-   ([comparison](https://github.com/plurano/python-library/pull/2#issuecomment-6104646636)).
-2. **The repository is private and its name is a working name**
-   (`visibility: private` and the description in
-   [.standards.yaml](../../.standards.yaml); `name` and `version` in
-   [pyproject.toml](../../pyproject.toml)). Nothing is published before the
-   first public release, and that release, its name and its place of
-   publication are the operator's decision (fleet answer ledger,
+   (comparison recorded on pull request 2 of the private predecessor repository
+   `plurano/python-library`, comment 6104646636).
+2. **The repository is private and nothing is released yet**
+   (`visibility: private` in [.standards.yaml](../../.standards.yaml);
+   `version` in [pyproject.toml](../../pyproject.toml)). The name `cistula`
+   is chosen (fleet answer ledger, `python-library-name`, 2026-10-12) and is
+   final with the first release. Nothing is published before the first public
+   release, and that release and its place of publication are the operator's
+   decision (fleet answer ledger,
    `python-library-release-precedent`, 2026-10-11).
 3. **The declared supply chain is ahead of the workflows.**
    [.config/archetypes/framework.yaml](../../.config/archetypes/framework.yaml)
@@ -64,9 +66,9 @@ local build must print the same one. The hashes a pull request run prints are
 not to be pinned: that run builds the forge's test merge commit, which has its
 own date (README, "Two limits").
 
-While the repository is private and carries a working name, the version stays
-`0.1.0.dev0` and no tag is cut, not even a release candidate: a tag stays for
-good, and the name is not final. The first tag comes with the first public
+While the repository is private, the version stays `0.1.0.dev0` and no tag is
+cut, not even a release candidate: a tag stays for good, and the name is final
+only with the first release. The first tag comes with the first public
 release (fleet answer ledger, `python-library-pilot-pin`, 2026-10-11).
 
 ### One build path
