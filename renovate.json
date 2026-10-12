@@ -1,6 +1,9 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Every value comes from the family's shared preset, the default.json of Horistes (Greek horistes, the boundary commissioner who fixes limits; pronounced ho-RIS-tees), the shared CI repository. Nothing is set here."
+  ],
   "extends": [
-    "github>plurano/shared-ci"
+    "github>plurano/horistes"
   ]
 }
