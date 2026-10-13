@@ -22,7 +22,7 @@ authors = [{ name = "Lusoris", email = "lusoris@proton.me" }]
 dependencies = []
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Operating System :: POSIX",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
