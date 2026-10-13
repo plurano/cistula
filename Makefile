@@ -31,7 +31,7 @@ export SOURCE_DATE_EPOCH
 # from running side by side.
 .NOTPARALLEL:
 
-.PHONY: verify-all verify-engine-pin verify fetch environment verify-static package verify-reproducible verify-python lock clean
+.PHONY: verify-all verify-engine-pin verify fetch environment verify-static package verify-package-size verify-reproducible verify-python lock clean
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. It runs this
@@ -57,11 +57,11 @@ verify-engine-pin:
 
 # This repository's own checks; they need no engine. `fetch` is the only step
 # that reaches the package index; everything after it runs without a network.
-verify: fetch verify-static package verify-reproducible
+verify: fetch verify-static package verify-package-size verify-reproducible
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory verify-python PYTHON="$$python"; \
 	done
-	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Python versions, package, same bytes from a second build, and its tests on $(PYTHONS).'
+	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Python versions, package, its size as the README states it, same bytes from a second build, and its tests on $(PYTHONS).'
 
 fetch:
 	@set -e; for python in $(PYTHONS); do \
@@ -109,6 +109,11 @@ package: environment
 	'$(ENV)/bin/python' tools/reproducible_sdist.py '$(DIST)'/*.tar.gz
 	umask 022 && '$(ENV)/bin/python' -m build --wheel --no-isolation --outdir '$(DIST)' '$(DIST)'/*.tar.gz
 	sha256sum '$(DIST)'/*
+
+# The size of the package, which the README states, is measured: a figure
+# that is off by more than a tenth fails, so the sentence is kept current.
+verify-package-size: environment
+	'$(ENV)/bin/python' tools/check_package_size.py README.md '$(DIST)'
 
 # The same commit gives the same bytes: every interpreter builds the package
 # once more, later and under another file mode mask of the caller, and a
