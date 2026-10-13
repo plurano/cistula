@@ -197,7 +197,8 @@ no workflow declares the pin.
    Every package is pinned by hash; nothing else is installed.
 2. Format, lint, types, licence headers, the exception list and the list of
    supported Python versions are checked once.
-3. One source distribution and one wheel are built.
+3. One source distribution and one wheel are built, and their sizes are
+   checked against the figures under [Reproducible package](#reproducible-package).
 4. Every interpreter builds both once more. One differing byte fails.
 5. The wheel of step 3 is installed into each environment, and the tests run
    against the installed package with 100 % branch coverage required.
@@ -229,7 +230,10 @@ things make it so:
 - **No compression.** Both files store their members uncompressed
   ([setup.cfg](setup.cfg) for the wheel). zlib and zlib-ng give different
   bytes for the same input, and interpreters are built with either. The price
-  is size: about 174 kB and 46 kB instead of 36 kB and 19 kB.
+  is size: about 277 kB and 64 kB instead of 56 kB and 24 kB.
+  [tools/check_package_size.py](tools/check_package_size.py) measures the
+  four sizes in the gate (`make verify-package-size`) and fails when a figure
+  in this sentence is off by more than a tenth.
 
 `make verify-reproducible` is the check, and part of the gate: each
 interpreter builds the package again under another file mode mask, and
