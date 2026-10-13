@@ -31,7 +31,7 @@ env:
   # name is the one the engine's hook launcher reads
   # (.config/lefthook/engine.sh), so the local hooks and `make verify-all`
   # run this same commit and not whatever praetorctl is on PATH.
-  PRAETOR_REF: "3bbde07342bdece12c46f74b0ee2c1f51129478f"
+  PRAETOR_REF: "c444d87e6e6e1c88bfdcb32b56f20123585447bb"
 
 jobs:
   verify:
