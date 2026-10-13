@@ -8,8 +8,9 @@ so a child that ignores the first signal or leaves a descendant behind cannot
 keep the caller waiting. `child_env` builds the environment for such a child
 without touching the environment of the calling process.
 
-POSIX only: process groups and their signals do not exist on Windows, and
-`run` refuses to start there instead of running without the guarantee.
+POSIX only, and tested on Linux only: process groups and their signals do not
+exist on Windows, and `run` refuses to start there instead of running without
+the guarantee.
 """
 
 from __future__ import annotations

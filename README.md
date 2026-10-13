@@ -137,8 +137,14 @@ write_json("record.json", record)
 
 ### Limits
 
-- POSIX only. Process groups do not exist on Windows; `run` raises
-  `NotImplementedError` there instead of running without the guarantee.
+- Tested on Linux only: CI runs Ubuntu 24.04
+  ([ci.yml](.github/workflows/ci.yml)). The code uses POSIX interfaces only,
+  but no test runs on macOS or a BSD, and the guarantees can differ there. On
+  macOS, for one, `fsync` hands the data to the drive without asking the drive
+  to store it; that takes `F_FULLFSYNC`
+  ([fsync(2)](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fsync.2.html)),
+  which the writers do not call. Process groups do not exist on Windows; `run`
+  raises `NotImplementedError` there instead of running without the guarantee.
 - A descendant that moves itself into another session leaves the group and
   outlives the kill. `run` still returns within the limit plus the grace
   period.

@@ -4,8 +4,9 @@
 # Verification gate: runs `make verify-all`, the same target a contributor
 # runs locally. One job installs every supported interpreter, because the gate
 # builds one wheel and tests that same wheel on each of them; a job per
-# interpreter would build and test three different files. Linux only: the
-# library refuses to run where process groups are missing.
+# interpreter would build and test three different files. Linux only, which
+# is why the README and the package metadata claim Linux and no other system;
+# the library refuses to run where process groups are missing.
 #
 # The gate ends with the standards engine (agent contexts, text register,
 # audit). The engine is built here from one pinned commit of its public
