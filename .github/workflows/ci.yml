@@ -17,6 +17,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  # A merge queue reports the required check on the merge group's commit.
+  merge_group:
 
 permissions:
   contents: read

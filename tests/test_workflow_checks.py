@@ -10,6 +10,7 @@ does, and sees it refuse the defect and admit the good case.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -274,3 +275,40 @@ def test_verify_engine_pin_refuses_a_missing_pin(tmp_path: Path, workflow: str |
     result = verify_engine_pin(tmp_path, workflow)
     assert result.returncode != 0
     assert "no workflow declares PRAETOR_REF" in result.stderr
+
+
+def _on_block(lines: list[str]) -> list[str]:
+    """Return the lines of the `on:` block: up to the next line that starts without indentation."""
+    # YAML 1.1 reads a bare `on` as true, so a generated workflow quotes the key.
+    starts = [number for number, line in enumerate(lines) if line in {"on:", "'on':", '"on":'}]
+    assert len(starts) == 1, f"{len(starts)} trigger blocks"
+    block = []
+    for line in lines[starts[0] + 1 :]:
+        if line.strip() and not line[0].isspace():
+            break
+        block.append(line.strip())
+    return block
+
+
+def test_every_required_check_reports_in_a_merge_queue() -> None:
+    with open(os.path.join(REPOSITORY, ".github", "rulesets", "main.json"), encoding="utf-8") as handle:
+        rules = json.load(handle)["rules"]
+    contexts = [
+        check["context"]
+        for rule in rules
+        if rule["type"] == "required_status_checks"
+        for check in rule["parameters"]["required_status_checks"]
+    ]
+    assert contexts
+    folder = os.path.join(REPOSITORY, ".github", "workflows")
+    workflows = {}
+    for name in sorted(os.listdir(folder)):
+        with open(os.path.join(folder, name), encoding="utf-8") as handle:
+            workflows[name] = handle.read().splitlines()
+    for context in contexts:
+        found = [name for name, lines in workflows.items() if f"    name: {context}" in lines]
+        assert len(found) == 1, f"{len(found)} workflows run the required check {context!r}"
+        triggers = _on_block(workflows[found[0]])
+        assert any(line.startswith("merge_group:") for line in triggers), (
+            f"{found[0]} runs the required check {context!r} but not in a merge queue"
+        )
