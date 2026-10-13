@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: EUPL-1.2
 from __future__ import annotations
 
+import dataclasses
 import math
 import os
 import signal
@@ -181,11 +182,29 @@ def test_input_larger_than_a_pipe_buffer_is_delivered_whole() -> None:
     assert result.stdout == f"{len(data)}\n"
 
 
-def test_output_that_is_not_utf8_is_kept_as_bytes_and_replaced_in_text() -> None:
-    result = run(python("import sys; sys.stdout.buffer.write(b'\\xff\\xfeok')"), timeout=ENOUGH)
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_output_that_is_not_utf8_is_kept_as_bytes_and_replaced_in_text(stream: str) -> None:
+    result = run(python(f"import sys; sys.{stream}.buffer.write(b'\\xff\\xfeok')"), timeout=ENOUGH)
 
-    assert result.stdout_bytes == b"\xff\xfeok"
-    assert result.stdout == "��ok"
+    assert getattr(result, f"{stream}_bytes") == b"\xff\xfeok"
+    assert getattr(result, stream) == "��ok"
+
+
+def test_result_cannot_be_changed() -> None:
+    result = run(python("pass"), timeout=ENOUGH)
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        result.returncode = 1  # type: ignore[misc]
+    field, new_name = "stdout_bytes", "extra"
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        delattr(result, field)
+    # Python 3.11 refuses a new name with TypeError: its frozen __setattr__ still names the
+    # class that slots replaced. Later versions raise FrozenInstanceError.
+    with pytest.raises((dataclasses.FrozenInstanceError, TypeError)):
+        setattr(result, new_name, 1)
+    # With slots an instance has no dictionary in which a field could be set past the guard.
+    assert not hasattr(result, "__dict__")
+    assert result.returncode == 0
 
 
 # --- a command that cannot start -------------------------------------------
