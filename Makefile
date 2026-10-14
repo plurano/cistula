@@ -61,7 +61,7 @@ verify: fetch verify-static package verify-package-size verify-reproducible
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory verify-python PYTHON="$$python"; \
 	done
-	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Python versions, package, its size as the README states it, same bytes from a second build, and its tests on $(PYTHONS).'
+	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Python versions, package, its size as the README states it, same bytes from a second build, a consumer install by hash, and its tests on $(PYTHONS).'
 
 fetch:
 	@set -e; for python in $(PYTHONS); do \
@@ -129,12 +129,15 @@ verify-reproducible:
 
 # Per interpreter: install the wheel and run the tests against the installed
 # package, not against the source tree. The interpreter is printed first so
-# the log names what ran.
+# the log names what ran. Before the tests, the wheel is installed the way the
+# README tells a consumer to (a new environment, the wheel pinned by its hash,
+# nothing else in it) and tests/consumer.py calls the public interface there.
 verify-python: environment
 	'$(ENV)/bin/python' -VV
 	'$(ENV)/bin/python' -m pip install --disable-pip-version-check --no-index --no-deps \
 		--force-reinstall dist/*.whl
 	'$(ENV)/bin/python' -I -c 'import cistula as p; print(p.__file__); assert "site-packages" in p.__file__'
+	'$(ENV)/bin/python' tools/check_consumer.py dist tests/consumer.py
 	COVERAGE_FILE='$(ENV)/coverage' '$(ENV)/bin/python' -m coverage run -m pytest
 	COVERAGE_FILE='$(ENV)/coverage' '$(ENV)/bin/python' -m coverage report
 

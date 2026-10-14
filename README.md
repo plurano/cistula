@@ -207,7 +207,11 @@ no workflow declares the pin.
    checked against the figures under [Reproducible package](#reproducible-package).
 4. Every interpreter builds both once more. One differing byte fails.
 5. The wheel of step 3 is installed into each environment, and the tests run
-   against the installed package with 100 % branch coverage required.
+   against the installed package with 100 % branch coverage required. Before
+   them, [tools/check_consumer.py](tools/check_consumer.py) installs the wheel
+   as [Installing](#installing) describes, into a new environment that holds
+   nothing else, and [tests/consumer.py](tests/consumer.py) calls the public
+   interface there from an empty directory.
 6. The standards engine checks that the agent contexts equal `AGENTS.md`,
    checks the register of the configured texts and runs its audit.
 
