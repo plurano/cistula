@@ -44,7 +44,7 @@ network.
 | Module | What it does |
 | --- | --- |
 | `process` | `run` starts a command under a time limit the caller must state. `child_env` builds the environment for such a child. |
-| `files` | `read_json` and `loads_json` refuse a repeated key and a number JSON does not have. `write_bytes_atomic`, `write_text_atomic` and `write_json` replace a file in one step. `open_bytes_atomic`, `open_text_atomic` and `staged_path` do that for content written in a `with` block. |
+| `files` | `read_json` and `loads_json` refuse a repeated key and a number JSON does not have. `write_bytes_atomic`, `write_text_atomic` and `write_json` replace a file in one step. `open_bytes_atomic`, `open_text_atomic` and `staged_path` do that for content written in a `with` block. Files that can be made again (caches, per-item results) take `durable=False`; everything else keeps the default, which costs milliseconds per file (see Guarantees). |
 | `digest` | `sha256_file`, `sha256_bytes` and `sha256_text`. |
 
 ```python
@@ -107,11 +107,22 @@ write_json("record.json", record)
   `test_staged_path_refuses_the_file_of_a_producer_that_has_not_written_yet`).
 - **Durable by default.** The writers flush the file before the rename and the
   directory after it. On a disk a flush takes milliseconds where the write
-  alone takes microseconds. A caller that writes many files it can make again
-  passes `durable=False`. That call is **not crash-safe**: after a power
-  failure or a crash of the operating system the target can hold the old
-  content, the new content, or an empty or incomplete file. The replace is
-  still one step for every reader.
+  alone takes microseconds. Measured for one small file on NVMe disks
+  (median of 200 calls, `PYTHONPATH=src python
+  tools/measure_durable_write.py DIRECTORY`):
+
+  | File system | Default (`durable=True`) | `durable=False` |
+  | --- | --- | --- |
+  | btrfs | 10 ms (18 to 36 ms in earlier runs) | 15 µs |
+  | ZFS, `sync=standard` | 3 ms | 22 to 28 µs |
+  | tmpfs (memory, no disk) | 11 to 13 µs | 10 to 11 µs |
+
+  A caller that writes many files it can make again (caches, per-item
+  results) passes `durable=False`. That call is **not crash-safe**: after a
+  power failure or a crash of the operating system the target can hold the
+  old content, the new content, or an empty or incomplete file. The replace
+  is still one step for every reader. A flush shared by a group of files is
+  not offered; [ADR 0002](docs/adr/0002-grouped-flush.md) proposes one.
 - **Permissions.** An existing file keeps its permissions. A new file gets the
   permissions of any newly created file, so the process umask decides who can
   read it (mode 644 under umask 022). The writers make no file private; a
@@ -240,7 +251,7 @@ things make it so:
 - **No compression.** Both files store their members uncompressed
   ([setup.cfg](setup.cfg) for the wheel). zlib and zlib-ng give different
   bytes for the same input, and interpreters are built with either. The price
-  is size: about 277 kB and 64 kB instead of 62 kB and 24 kB.
+  is size: about 307 kB and 66 kB instead of 63 kB and 25 kB.
   [tools/check_package_size.py](tools/check_package_size.py) measures the
   four sizes in the gate (`make verify-package-size`) and fails when a figure
   in this sentence is off by more than a tenth.
