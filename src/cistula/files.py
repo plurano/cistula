@@ -358,19 +358,21 @@ def write_json(  # noqa: PLR0913 - one keyword per independent setting of the wr
     *,
     indent: int | None = 2,
     sort_keys: bool = True,
+    ensure_ascii: bool = False,
     durable: bool = True,
     parents: bool = False,
 ) -> None:
     """Replace the file at `path` with `value` as UTF-8 JSON in one step.
 
-    The document ends with a newline; non-ASCII text is written as itself, not
-    escaped. A value JSON cannot represent is refused before anything is
-    written: NaN and the two infinities raise `ValueError`, a value of a type
-    JSON does not have raises `TypeError`. See `write_bytes_atomic` for what
-    "in one step" guarantees, for the permissions of the file and for
-    `durable` and `parents`.
+    The document ends with a newline. Non-ASCII text is written as itself;
+    `ensure_ascii=True` writes each non-ASCII character as a Unicode escape,
+    as the standard serialiser does. A value JSON cannot represent is refused
+    before anything is written: NaN and the two infinities raise `ValueError`,
+    a value of a type JSON does not have raises `TypeError`. See
+    `write_bytes_atomic` for what "in one step" guarantees, for the
+    permissions of the file and for `durable` and `parents`.
     """
-    text = json.dumps(value, indent=indent, sort_keys=sort_keys, ensure_ascii=False, allow_nan=False)
+    text = json.dumps(value, indent=indent, sort_keys=sort_keys, ensure_ascii=ensure_ascii, allow_nan=False)
     write_text_atomic(path, text + "\n", durable=durable, parents=parents)
 
 

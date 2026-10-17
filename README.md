@@ -240,7 +240,7 @@ things make it so:
 - **No compression.** Both files store their members uncompressed
   ([setup.cfg](setup.cfg) for the wheel). zlib and zlib-ng give different
   bytes for the same input, and interpreters are built with either. The price
-  is size: about 277 kB and 64 kB instead of 56 kB and 24 kB.
+  is size: about 277 kB and 64 kB instead of 62 kB and 24 kB.
   [tools/check_package_size.py](tools/check_package_size.py) measures the
   four sizes in the gate (`make verify-package-size`) and fails when a figure
   in this sentence is off by more than a tenth.
