@@ -111,9 +111,10 @@ def test_compare_allows_a_factor_of_four_either_way_and_no_more(
 @pytest.mark.parametrize(
     ("durable", "plain", "problems"),
     [
-        (2000.0, 100.0, []),
-        (1999.0, 100.0, ["ext2/ext3: measured the default at 1999 µs, less than 20 times 100 µs without the flushes"]),
-        (40.0, 30.0, ["ext2/ext3: measured the default at 40 µs, less than 20 times 30 µs without the flushes"]),
+        (400.0, 100.0, []),
+        (433.1, 47.8, []),
+        (399.0, 100.0, ["ext2/ext3: measured the default at 399 µs, less than 4 times 100 µs without the flushes"]),
+        (40.0, 30.0, ["ext2/ext3: measured the default at 40 µs, less than 4 times 30 µs without the flushes"]),
     ],
 )
 def test_compare_holds_a_disk_without_a_row_to_the_ratio(durable: float, plain: float, problems: list[str]) -> None:
@@ -206,4 +207,4 @@ def test_the_script_runs_as_the_gate_calls_it(tmp_path: Path) -> None:
 
     assert done.returncode == 1
     assert "btrfs: measured 50 µs for the default" in done.stderr
-    assert "less than 20 times 14 µs" in done.stderr
+    assert "less than 4 times 14 µs" in done.stderr

@@ -149,9 +149,10 @@ verify-package-size: environment
 	'$(ENV)/bin/python' tools/check_package_size.py README.md '$(DIST)'
 
 # The cost of a durable write, which the README states per file system, is
-# measured here: a default write that costs less than 20 times one without the
-# flushes did not reach the disk, and a figure off by more than a factor of 4
-# for the file system measured is out of date (tools/check_durable_figures.py).
+# measured here: on a disk, a default write that costs less than 4 times one
+# without the flushes did not reach the disk, and a figure off by more than a
+# factor of 4 for the file system measured is out of date
+# (tools/check_durable_figures.py).
 verify-durable-figures: environment
 	rm -rf build/durable && mkdir -p build/durable
 	PYTHONPATH=src '$(ENV)/bin/python' tools/measure_durable_write.py build/durable 50 > build/durable.tsv

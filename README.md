@@ -121,7 +121,9 @@ write_json("record.json", record)
   table is out of date (`tools/check_durable_figures.py`): every disk row must
   state the default at least 20 times the cost without the flushes, a
   measured figure must lie within a factor of 4 of its row, and on a disk the
-  measured default must cost at least 20 times the write alone.
+  measured default must cost at least 4 times the write alone. The last bound
+  is lower because a virtual disk with a write cache flushes fast: ext4 on
+  the CI runner measured 433 µs against 48 µs.
 
   A caller that writes many files it can make again (caches, per-item
   results) passes `durable=False`. That call is **not crash-safe**: after a

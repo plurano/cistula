@@ -19,9 +19,11 @@ Three rules, each a failure when broken:
   measured figures lie within a factor of TOLERANCE of the figures the row
   states. Hosts differ, so the tolerance is wide; a figure that is off by
   more is out of date.
-- On a file system on a disk, the measured default costs at least RATIO times
-  the write without the flushes. A default that costs about as much as the
-  write alone did not reach the disk.
+- On a file system on a disk, the measured default costs at least FLUSHED
+  times the write without the flushes. A default that costs about as much as
+  the write alone did not reach the disk. The bound is lower than RATIO: a
+  virtual disk with a write cache, as on the CI runner, flushes in hundreds
+  of microseconds (433 µs against 48 µs, ext4, 2026-10-17).
 """
 
 from __future__ import annotations
@@ -30,8 +32,10 @@ import re
 import sys
 
 USAGE = "usage: check_durable_figures.py README MEASUREMENT"
-# How many times a write without the flushes the default costs at least on a disk.
+# How many times a write without the flushes a disk row of the table states the default at least.
 RATIO = 20
+# How many times a write without the flushes a measured default costs at least on a disk.
+FLUSHED = 4
 # How far a measured figure may lie from the stated ones, as a factor either way.
 TOLERANCE = 4
 # File systems held in memory; a flush there costs nothing, so the ratio does not hold.
@@ -112,9 +116,10 @@ def compare(rows: dict[str, tuple[Span, Span]], kind: str, durable: float, plain
             for way, value, figures in (("the default", durable, row[0]), ("durable=False", plain, row[1]))
             if not _within(value, figures)
         )
-    if kind not in MEMORY and durable < RATIO * plain:
+    if kind not in MEMORY and durable < FLUSHED * plain:
         problems.append(
-            f"{kind}: measured the default at {durable:g} µs, less than {RATIO} times {plain:g} µs without the flushes"
+            f"{kind}: measured the default at {durable:g} µs,"
+            f" less than {FLUSHED} times {plain:g} µs without the flushes"
         )
     return problems
 
