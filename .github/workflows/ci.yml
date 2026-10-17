@@ -30,12 +30,9 @@ concurrency:
 
 env:
   REUSE_VERSION: "6.2.0"
-  # trivy scans the locks offline for known vulnerabilities (HISS-11); the
-  # digest is the one its release publishes for the Linux archive of this
-  # version. semgrep needs no step here: `make fetch` installs it from
+  # trivy comes from .github/actions/install-trivy, which holds its pin.
+  # semgrep needs no step here: `make fetch` installs it from
   # requirements/semgrep.txt by hash.
-  TRIVY_VERSION: "0.76.0"
-  TRIVY_SHA256_LINUX: "e24b1c51293c1b15e4ba8d45bbc7891ba053f90278ec2698f3562c993e145fe7"
   # Published Praetor commit that builds the praetorctl this gate pins. The
   # name is the one the engine's hook launcher reads
   # (.config/lefthook/engine.sh), so the local hooks and `make verify-all`
@@ -111,18 +108,9 @@ jobs:
             3.13
             3.14
 
-      # The archive is held to its pinned digest before anything of it is
-      # unpacked.
       - name: Install the pinned trivy
-        run: |
-          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
-          dir="$RUNNER_TEMP/trivy"
-          mkdir -p "$dir"
-          curl -fsSL --max-time 120 -o "$dir/$archive" \
-            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/$archive"
-          echo "$TRIVY_SHA256_LINUX  $dir/$archive" | sha256sum -c -
-          tar -xzf "$dir/$archive" -C "$dir" trivy
-          "$dir/trivy" --version
+        id: trivy
+        uses: ./.github/actions/install-trivy
 
       - name: Check out pinned Praetor source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -164,7 +152,7 @@ jobs:
         run: >-
           make verify-all
           REUSE="pipx run reuse==${REUSE_VERSION}"
-          TRIVY="$RUNNER_TEMP/trivy/trivy"
+          TRIVY="${{ steps.trivy.outputs.path }}"
           PRAETORCTL="$RUNNER_TEMP/bin/praetorctl"
 
       - name: Sign-off on pull request commits
