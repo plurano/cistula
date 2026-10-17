@@ -39,7 +39,7 @@ export SOURCE_DATE_EPOCH
 # from running side by side.
 .NOTPARALLEL:
 
-.PHONY: verify-all verify-engine-pin verify fetch environment semgrep-environment verify-static verify-scanners package verify-package-size verify-reproducible verify-python lock clean
+.PHONY: verify-all verify-engine-pin verify fetch environment semgrep-environment verify-static verify-scanners package verify-package-size verify-durable-figures verify-reproducible verify-python lock clean
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. It runs this
@@ -66,11 +66,11 @@ verify-engine-pin:
 # This repository's own checks; they need no engine. `fetch` is the only step
 # that reaches the network (the package index, and ghcr.io for the trivy
 # database); everything after it runs offline.
-verify: fetch verify-static verify-scanners package verify-package-size verify-reproducible
+verify: fetch verify-static verify-scanners package verify-package-size verify-durable-figures verify-reproducible
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory verify-python PYTHON="$$python"; \
 	done
-	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Python versions, semgrep and trivy scans, package, its size as the README states it, same bytes from a second build, a consumer install by hash, and its tests on $(PYTHONS).'
+	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Python versions, semgrep and trivy scans, package, its size as the README states it, the durable-write figures the README states, same bytes from a second build, a consumer install by hash, and its tests on $(PYTHONS).'
 
 fetch:
 	@set -e; for python in $(PYTHONS); do \
@@ -147,6 +147,16 @@ package: environment
 # that is off by more than a tenth fails, so the sentence is kept current.
 verify-package-size: environment
 	'$(ENV)/bin/python' tools/check_package_size.py README.md '$(DIST)'
+
+# The cost of a durable write, which the README states per file system, is
+# measured here: on a disk, a default write that costs less than 4 times one
+# without the flushes did not reach the disk, and a figure off by more than a
+# factor of 4 for the file system measured is out of date
+# (tools/check_durable_figures.py).
+verify-durable-figures: environment
+	rm -rf build/durable && mkdir -p build/durable
+	PYTHONPATH=src '$(ENV)/bin/python' tools/measure_durable_write.py build/durable 50 > build/durable.tsv
+	'$(ENV)/bin/python' tools/check_durable_figures.py README.md build/durable.tsv
 
 # The same commit gives the same bytes: every interpreter builds the package
 # once more, later and under another file mode mask of the caller, and a

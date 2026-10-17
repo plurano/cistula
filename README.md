@@ -117,6 +117,14 @@ write_json("record.json", record)
   | ZFS, `sync=standard` | 3 ms | 22 to 28 µs |
   | tmpfs (memory, no disk) | 11 to 13 µs | 10 to 11 µs |
 
+  `make verify` measures the file system of the checkout and fails when the
+  table is out of date (`tools/check_durable_figures.py`): every disk row must
+  state the default at least 20 times the cost without the flushes, a
+  measured figure must lie within a factor of 4 of its row, and on a disk the
+  measured default must cost at least 4 times the write alone. The last bound
+  is lower because a virtual disk with a write cache flushes fast: ext4 on
+  the CI runner measured 433 µs against 48 µs.
+
   A caller that writes many files it can make again (caches, per-item
   results) passes `durable=False`. That call is **not crash-safe**: after a
   power failure or a crash of the operating system the target can hold the
