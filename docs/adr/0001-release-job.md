@@ -178,16 +178,30 @@ cosign verify-blob \
 Each point is settled by a run before this record is accepted, or with the
 change that adds the step.
 
-- Whether a dry run on `main` and a tag run produce the files and the
-  notices described here; the first dry run after merging settles the build
-  half while the repository is private.
+- Whether a tag run produces the files and the notices described here.
 - The certificate identity a signature made inside the called workflow
   carries; the command above assumes the called workflow's path at the tag.
   The check ships with a wrong identity that it refuses.
-- Whether the parts lists are the same bytes on every run. They are not part
-  of the pinned bytes either way.
-- The plan limit of the forge's attestations for a private repository
-  (Context, point 4).
+
+### Measured
+
+- **A dry run on `main` produces the files and the notice described here.**
+  Two dispatch runs on `main` at `3c60bef` (runs 39053194183 and
+  39053196215) passed. Each stored the wheel, the source distribution,
+  `SHA256SUMS` and both parts lists as artifact `release-files`, ran only the
+  `build` job, and printed the notice of step 6. The two `SHA256SUMS` files
+  are equal, and their hashes (wheel `7e901206…`, source distribution
+  `fbb1a1d8…`) are the ones the gate printed for the same commit
+  (run 39052937645), for `dist/` and for the rebuild with each of Python 3.11
+  to 3.14.
+- **The parts lists are not the same bytes on every run.** Between the two
+  runs above, the SPDX file differs in `creationInfo.created` and
+  `documentNamespace`, and the CycloneDX file in `metadata.timestamp` and
+  `serialNumber`; with those fields removed, both are equal. They stay outside
+  the pinned bytes.
+- **The plan limit of attestations for a private repository no longer
+  applies.** The repository is public since 2026-10-17, so the tag run signs
+  and attests as a public one (Context, point 4).
 
 ## Consequences
 
