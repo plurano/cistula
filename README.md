@@ -34,7 +34,7 @@ all carry the name `cistula`.
 
 ## Status
 
-Private; nothing is released yet. The version is `0.1.0.dev0`.
+Public. The version is `0.1.0`, the first release ([CHANGELOG](CHANGELOG.md)).
 
 ## What the first release contains
 
@@ -241,7 +241,7 @@ pip install --require-hashes -r requirements.txt
 with this line in the consumer's `requirements.txt`:
 
 ```text
-cistula @ file:///path/to/dist/cistula-0.1.0.dev0-py3-none-any.whl --hash=sha256:<hash printed by make package>
+cistula @ file:///path/to/dist/cistula-0.1.0-py3-none-any.whl --hash=sha256:<hash printed by make package>
 ```
 
 The bytes of the wheel and of the source distribution depend on the commit
