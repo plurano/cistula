@@ -18,7 +18,8 @@ versions follow [PEP 440](https://peps.python.org/pep-0440/).
   child process.
 - Module `files`: `read_json` and `loads_json` refuse duplicate keys and
   non-finite numbers; `write_bytes_atomic`, `write_text_atomic` and
-  `write_json` replace a file in one step; `open_bytes_atomic`,
+  `write_json` replace a file in one step, and `write_json(ensure_ascii=True)`
+  escapes non-ASCII text as the standard serialiser does; `open_bytes_atomic`,
   `open_text_atomic` and `staged_path` publish a file written in a block.
 - Module `digest`: `sha256_file`, `sha256_bytes` and `sha256_text`.
 - A reproducible package: the same commit gives the same source

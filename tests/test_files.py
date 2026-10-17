@@ -1085,6 +1085,38 @@ def test_json_layout_options(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == '{"b": 1, "a": 2}\n'
 
 
+@pytest.mark.parametrize(("indent", "sort_keys"), [(2, True), (None, False), (4, True)])
+def test_json_ensure_ascii_writes_the_bytes_of_the_standard_serialiser(
+    tmp_path: Path, indent: int | None, *, sort_keys: bool
+) -> None:
+    path = tmp_path / "data.json"
+    value: JsonValue = {"b": ["Grüße", 2], "a": "Zürich"}
+
+    write_json(path, value, indent=indent, sort_keys=sort_keys, ensure_ascii=True)
+
+    expected = json.dumps(value, indent=indent, sort_keys=sort_keys, ensure_ascii=True) + "\n"
+    assert path.read_bytes() == expected.encode("ascii")
+
+
+def test_json_default_writes_non_ascii_text_as_utf_8(tmp_path: Path) -> None:
+    path = tmp_path / "data.json"
+
+    write_json(path, {"a": "Zürich"})
+
+    assert "Zürich".encode() in path.read_bytes()
+    assert b"\\u00fc" not in path.read_bytes()
+
+
+def test_json_ensure_ascii_boundaries(tmp_path: Path) -> None:
+    path = tmp_path / "data.json"
+    value: JsonValue = {"\u00e9cole": "", "a": "\U0001f600"}
+
+    write_json(path, value, indent=None, ensure_ascii=True)
+
+    assert path.read_bytes() == b'{"a": "\\ud83d\\ude00", "\\u00e9cole": ""}\n'
+    assert read_json(path) == value
+
+
 @pytest.mark.parametrize("value", [None, True, 0, -1.5, "", "text", [], {}, {"nested": [{"deep": [None, 1]}]}])
 def test_written_json_reads_back_equal(tmp_path: Path, value: JsonValue) -> None:
     path = tmp_path / "round.json"
