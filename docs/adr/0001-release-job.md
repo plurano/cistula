@@ -109,7 +109,10 @@ Steps of the one job in `release-build.yml`, in order:
 2. On a tag: refuse unless the tag is `v` plus the `version` of
    [pyproject.toml](../../pyproject.toml), and unless the tagged commit is an
    ancestor of `origin/main`.
-3. `make verify REUSE="pipx run reuse==6.2.0"`.
+3. Install the pinned trivy with
+   [.github/actions/install-trivy](../../.github/actions/install-trivy/action.yml),
+   the action the gate uses, then
+   `make verify REUSE="pipx run reuse==6.2.0" TRIVY=<its path>`.
 4. Write `SHA256SUMS` for the two files of `dist/` and print it into the run
    summary (`$GITHUB_STEP_SUMMARY`).
 5. Write the parts lists of the unpacked wheel with syft, as SPDX JSON

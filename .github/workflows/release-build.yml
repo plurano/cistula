@@ -74,8 +74,16 @@ jobs:
             fi
           fi
 
+      # `make verify` scans the locks with trivy, as the gate does.
+      - name: Install the pinned trivy
+        id: trivy
+        uses: ./.github/actions/install-trivy
+
       - name: Build and verify the library
-        run: make verify REUSE="pipx run reuse==${REUSE_VERSION}"
+        run: >-
+          make verify
+          REUSE="pipx run reuse==${REUSE_VERSION}"
+          TRIVY="${{ steps.trivy.outputs.path }}"
 
       - name: Write the checksums
         working-directory: dist

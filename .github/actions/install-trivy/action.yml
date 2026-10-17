@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+# Installs the pinned trivy for `make verify`, which scans the locks offline
+# for known vulnerabilities (HISS-11). The gate (ci.yml) and the release
+# builder (release-build.yml) both run that target, so both take trivy from
+# here and the pin lives in one place. The digest is the one the trivy release
+# publishes for the Linux archive of this version, and the archive is held to
+# it before anything of it is unpacked.
+name: Install the pinned trivy
+description: Download trivy by pinned version and digest; output its path.
+
+outputs:
+  path:
+    description: Absolute path of the trivy binary
+    value: ${{ steps.install.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Download and check the archive
+      id: install
+      shell: bash
+      env:
+        TRIVY_VERSION: "0.76.0"
+        TRIVY_SHA256_LINUX: "e24b1c51293c1b15e4ba8d45bbc7891ba053f90278ec2698f3562c993e145fe7"
+      run: |
+        archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+        dir="$RUNNER_TEMP/trivy"
+        mkdir -p "$dir"
+        curl -fsSL --max-time 120 -o "$dir/$archive" \
+          "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/$archive"
+        echo "$TRIVY_SHA256_LINUX  $dir/$archive" | sha256sum -c -
+        tar -xzf "$dir/$archive" -C "$dir" trivy
+        "$dir/trivy" --version
+        echo "path=$dir/trivy" >> "$GITHUB_OUTPUT"
