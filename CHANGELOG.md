@@ -11,6 +11,8 @@ versions follow [PEP 440](https://peps.python.org/pep-0440/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-17
+
 ### Added
 
 - Module `process`: `run` starts a command with a required timeout and ends
