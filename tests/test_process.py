@@ -31,12 +31,62 @@ from cistula.process import (
 ENOUGH = 60.0
 
 # A planted child needs this long at most to start and install its signal
-# handling, even on a loaded machine; time limits that must expire are longer.
+# handling, even on a loaded machine. Tests do not wait this long: a limit
+# that must expire is made to expire once the child says it is ready
+# (`expire_when_ready`), and STARTED is only the latest moment for that.
 STARTED = 3.0
+
+# How often a test looks whether a planted child is ready.
+POLL = 0.01
 
 
 def python(code: str, *arguments: str) -> list[str]:
     return [sys.executable, "-c", code, *arguments]
+
+
+def expire_when_ready(monkeypatch: pytest.MonkeyPatch, ready: bytes = b"") -> list[float | None]:
+    """Let the time limit of the next `run` expire once the child has printed `ready`.
+
+    The limit is the deadline `run` hands to `Popen.communicate`. Instead of
+    sitting out a fixed limit long enough for any child to start, the first
+    wait raises `TimeoutExpired` as soon as the output holds `ready`, and at
+    STARTED at the latest. Every later wait is the real one. Returns the list
+    of the deadlines `run` asked for.
+    """
+    real_communicate = subprocess.Popen.communicate
+    limits: list[float | None] = []
+
+    def expiring(
+        child: subprocess.Popen[bytes],
+        input: bytes | None = None,  # noqa: A002
+        timeout: float | None = None,
+    ) -> Any:
+        limits.append(timeout)
+        if len(limits) > 1:
+            return real_communicate(child, input, timeout)
+        expired = subprocess.TimeoutExpired(child.args, STARTED)
+        for attempt in range(int(STARTED / POLL)):
+            try:
+                return real_communicate(child, input if attempt == 0 else None, POLL)
+            except subprocess.TimeoutExpired as waited:
+                expired = waited
+                if ready in (waited.stdout or b""):
+                    break
+        raise expired
+
+    monkeypatch.setattr(subprocess.Popen, "communicate", expiring)
+    return limits
+
+
+def interrupt_when_beating(path: Path, stop: threading.Event) -> None:
+    """Send SIGINT to this process once the heartbeat file at `path` is written."""
+    for _ in range(int(STARTED / POLL)):
+        if stop.is_set():
+            return
+        if path.exists() and path.stat().st_size > 0:
+            break
+        stop.wait(POLL)
+    os.kill(os.getpid(), signal.SIGINT)
 
 
 def beating(path: Path) -> bool:
@@ -311,63 +361,83 @@ def test_refuses_to_run_without_process_groups(monkeypatch: pytest.MonkeyPatch) 
 # --- the time limit ------------------------------------------------------------
 
 
-def test_expired_limit_stops_an_obedient_child() -> None:
-    result = run(python("import time; print('early', flush=True); time.sleep(60)"), timeout=STARTED)
+def test_limit_expires_on_the_real_clock() -> None:
+    limit = 0.2
 
+    result = run(python("import time; time.sleep(60)"), timeout=limit, kill_after=0)
+
+    assert result.timed_out is True
+    assert limit <= result.duration < limit + 2.0
+
+
+def test_expired_limit_stops_an_obedient_child(monkeypatch: pytest.MonkeyPatch) -> None:
+    limits = expire_when_ready(monkeypatch, b"early")
+
+    result = run(python("import time; print('early', flush=True); time.sleep(60)"), timeout=ENOUGH)
+
+    assert limits[0] == ENOUGH
     assert result.timed_out is True
     assert result.returncode == -signal.SIGTERM
     assert result.stdout == "early\n"
-    assert STARTED <= result.duration < STARTED + 2.0
+    assert result.duration < STARTED + 2.0
 
 
-def test_child_that_handles_the_first_signal_keeps_its_exit_status() -> None:
+def test_child_that_handles_the_first_signal_keeps_its_exit_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    expire_when_ready(monkeypatch, b"ready")
     code = """
 import signal, sys, time
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(7))
 print("ready", flush=True)
 time.sleep(60)
 """
-    result = run(python(code), timeout=STARTED)
+    result = run(python(code), timeout=ENOUGH)
 
     assert result.stdout == "ready\n"
     assert result.timed_out is True
     assert result.returncode == 7
 
 
-def test_child_that_ignores_the_first_signal_is_killed(tmp_path: Path) -> None:
+def test_child_that_ignores_the_first_signal_is_killed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     beat = tmp_path / "beat"
+    limits = expire_when_ready(monkeypatch, b"ready")
 
-    result = run(python(IGNORES_TERM, str(beat)), timeout=STARTED, kill_after=0.5)
+    result = run(python(IGNORES_TERM, str(beat)), timeout=ENOUGH, kill_after=0.5)
 
     # "ready" proves the child had installed its handler before the limit
     # expired, so the first signal really was ignored.
     assert result.stdout == "ready\n"
     assert result.timed_out is True
     assert result.returncode == -signal.SIGKILL
-    assert STARTED + 0.5 <= result.duration < STARTED + 0.5 + 1.0
+    assert limits[:2] == [ENOUGH, 0.5]
+    assert 0.5 <= result.duration < STARTED + 0.5 + 1.0
     assert not beating(beat)
 
 
-def test_kill_after_zero_kills_at_once(tmp_path: Path) -> None:
+def test_kill_after_zero_kills_at_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     beat = tmp_path / "beat"
+    limits = expire_when_ready(monkeypatch, b"ready")
 
-    result = run(python(IGNORES_TERM, str(beat)), timeout=STARTED, kill_after=0)
+    result = run(python(IGNORES_TERM, str(beat)), timeout=ENOUGH, kill_after=0)
 
     assert result.stdout == "ready\n"
     assert result.returncode == -signal.SIGKILL
+    assert limits[:2] == [ENOUGH, 0]
     assert result.duration < STARTED + 1.0
     assert not beating(beat)
 
 
-def test_descendant_that_holds_the_output_is_killed_with_the_group(tmp_path: Path) -> None:
+def test_descendant_that_holds_the_output_is_killed_with_the_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     beat = tmp_path / "beat"
+    expire_when_ready(monkeypatch, b"ready")
     # The child starts a descendant that ignores the first signal and inherits
     # the output pipes, then exits at once with status 0.
     code = f"""
 import subprocess, sys
 subprocess.Popen([sys.executable, "-c", {IGNORES_TERM!r}, sys.argv[1]])
 """
-    result = run(python(code, str(beat)), timeout=STARTED, kill_after=0.5)
+    result = run(python(code, str(beat)), timeout=ENOUGH, kill_after=0.5)
 
     assert result.stdout == "ready\n"
     assert result.timed_out is True
@@ -376,8 +446,9 @@ subprocess.Popen([sys.executable, "-c", {IGNORES_TERM!r}, sys.argv[1]])
     assert not beating(beat)
 
 
-def test_descendant_outside_the_group_cannot_hold_the_call(tmp_path: Path) -> None:
+def test_descendant_outside_the_group_cannot_hold_the_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     beat = tmp_path / "beat"
+    expire_when_ready(monkeypatch, b"\n")
     # The descendant starts a session of its own, so the group signals do not
     # reach it, and it keeps the output pipes open.
     escaped = f"""
@@ -390,7 +461,7 @@ print(os.getpid(), flush=True)
 import subprocess, sys
 subprocess.Popen([sys.executable, "-c", {escaped!r}, sys.argv[1]])
 """
-    result = run(python(code, str(beat)), timeout=STARTED, kill_after=0.2)
+    result = run(python(code, str(beat)), timeout=ENOUGH, kill_after=0.2)
     try:
         assert result.timed_out is True
         assert result.returncode == 0
@@ -401,18 +472,21 @@ subprocess.Popen([sys.executable, "-c", {escaped!r}, sys.argv[1]])
         os.kill(int(result.stdout), signal.SIGKILL)
 
 
-def test_child_that_never_reads_its_input_is_stopped() -> None:
+def test_child_that_never_reads_its_input_is_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
     data = b"i" * (1024 * 1024)
+    expire_when_ready(monkeypatch)
 
-    result = run(python("import time; time.sleep(60)"), timeout=STARTED, input=data)
+    result = run(python("import time; time.sleep(60)"), timeout=ENOUGH, input=data)
 
     assert result.timed_out is True
     assert result.duration < STARTED + 2.0
 
 
-def test_expired_limit_raises_with_check() -> None:
+def test_expired_limit_raises_with_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    expire_when_ready(monkeypatch, b"early")
+
     with pytest.raises(CommandTimeoutError) as caught:
-        run(python("import time; print('early', flush=True); time.sleep(60)"), timeout=STARTED, check=True)
+        run(python("import time; print('early', flush=True); time.sleep(60)"), timeout=ENOUGH, check=True)
 
     assert isinstance(caught.value, CommandFailedError)
     assert caught.value.result.timed_out is True
@@ -422,13 +496,15 @@ def test_expired_limit_raises_with_check() -> None:
 
 def test_interrupt_from_outside_leaves_no_child_running(tmp_path: Path) -> None:
     beat = tmp_path / "beat"
-    interrupt = threading.Timer(STARTED, os.kill, (os.getpid(), signal.SIGINT))
+    stop = threading.Event()
+    interrupt = threading.Thread(target=interrupt_when_beating, args=(beat, stop))
     interrupt.start()
     try:
         with pytest.raises(KeyboardInterrupt):
             run(python(IGNORES_TERM, str(beat)), timeout=ENOUGH)
     finally:
-        interrupt.cancel()
+        stop.set()
+        interrupt.join(ENOUGH)
 
     assert beat.stat().st_size > 0
     assert not beating(beat)
