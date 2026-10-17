@@ -55,6 +55,8 @@ testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = ["error"]
+# The longest a single test may take (tests/conftest.py).
+test_seconds = "10"
 
 [tool.coverage.run]
 branch = true
