@@ -7,7 +7,7 @@ SHELL := /bin/sh
 # Interpreters the gate runs on: the supported floor and every newer release.
 # A name is looked up on PATH; a full path works as well. An interpreter that
 # is missing fails the gate, it is never skipped.
-PYTHONS ?= python3.11 python3.12 python3.13 python3.14
+PYTHONS ?= python3.11 python3.12 python3.13 python3.14 python3.15
 
 # The interpreter of the targets that work on one version.
 PYTHON ?= $(firstword $(PYTHONS))

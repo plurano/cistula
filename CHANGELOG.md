@@ -11,6 +11,10 @@ versions follow [PEP 440](https://peps.python.org/pep-0440/).
 
 ## [Unreleased]
 
+### Added
+
+- Python 3.15 is supported and tested.
+
 ## [0.1.0] - 2026-10-17
 
 ### Added

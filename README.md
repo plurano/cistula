@@ -257,9 +257,10 @@ make verify-all
 ```
 
 This is the whole gate, and CI runs the same target. It needs `python3.11`,
-`python3.12`, `python3.13` and `python3.14` on `PATH` (or `PYTHONS="..."` with full paths),
-`reuse` 6.2.0, `trivy` 0.76.0 (or `TRIVY=...`) and the standards engine. An
-interpreter or a tool that is missing fails the gate.
+`python3.12`, `python3.13`, `python3.14` and `python3.15` on `PATH` (or
+`PYTHONS="..."` with full paths), `reuse` 6.2.0, `trivy` 0.76.0 (or
+`TRIVY=...`) and the standards engine. An interpreter or a tool that is
+missing fails the gate.
 
 The engine is the commit that `PRAETOR_REF` in
 [ci.yml](.github/workflows/ci.yml) pins, for the gate and for the Git hooks
