@@ -97,7 +97,7 @@ jobs:
           "$dir/gitleaks" git --redact --no-banner --exit-code 1 .
 
       # The action puts the directory of every listed version on PATH, so the
-      # names the Makefile looks up (python3.11 to python3.14) all
+      # names the Makefile looks up (python3.11 to python3.15) all
       # resolve to the versions installed here.
       - name: Install the supported interpreters
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -107,6 +107,7 @@ jobs:
             3.12
             3.13
             3.14
+            3.15
 
       - name: Install the pinned trivy
         id: trivy

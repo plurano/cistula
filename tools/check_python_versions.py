@@ -4,9 +4,10 @@
 
 The classifiers of `pyproject.toml` are the list of supported versions; the
 oldest is the floor. The gate runs the tests on the interpreters the Makefile
-names, CI installs the interpreters its workflow names, the lint and the type
-check read the floor from their own settings, and the lock is compiled for the
-floor. This script fails the gate when one of these places disagrees with the
+names, CI and the release build install the interpreters their workflows
+(`ci.yml` and `release-build.yml`) name, the lint and the type check read the
+floor from their own settings, and the lock is compiled for the floor. This
+script fails the gate when one of these places disagrees with the
 classifiers, so a version cannot be declared as supported without being
 tested, and the floor cannot move in one place only.
 """
@@ -23,6 +24,7 @@ LINT_CONFIG = "ruff.toml"
 MAKEFILE = "Makefile"
 LOCK = "requirements/dev.txt"
 WORKFLOW = ".github/workflows/ci.yml"
+RELEASE_WORKFLOW = ".github/workflows/release-build.yml"
 
 _CLASSIFIER = re.compile(r"^Programming Language :: Python :: (3\.\d+)$")
 _FLOOR = re.compile(r"^>=(3\.\d+)$")
@@ -72,8 +74,8 @@ def _gate_interpreters(root: str) -> list[str]:
     return [name.removeprefix("python") for line in found for name in line.split()]
 
 
-def _workflow_interpreters(root: str) -> list[str]:
-    return [line.strip() for block in _WORKFLOW_LIST.findall(_text(root, WORKFLOW)) for line in block.splitlines()]
+def _workflow_interpreters(root: str, file: str = WORKFLOW) -> list[str]:
+    return [line.strip() for block in _WORKFLOW_LIST.findall(_text(root, file)) for line in block.splitlines()]
 
 
 def places(root: str) -> list[tuple[str, object, object]]:
@@ -88,7 +90,8 @@ def places(root: str) -> list[tuple[str, object, object]]:
         (f"{MAKEFILE}: PYTHONS", _gate_interpreters(root), versions),
         (f"{MAKEFILE}: --python-version of the lock", _LOCK_TARGET.findall(_text(root, MAKEFILE)), [floor]),
         (f"{LOCK}: --python-version in the header", _LOCK_TARGET.findall(_text(root, LOCK)), [floor]),
-        (f"{WORKFLOW}: python-version", _workflow_interpreters(root), versions),
+        (f"{WORKFLOW}: python-version", _workflow_interpreters(root, WORKFLOW), versions),
+        (f"{RELEASE_WORKFLOW}: python-version", _workflow_interpreters(root, RELEASE_WORKFLOW), versions),
     ]
 
 
