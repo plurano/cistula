@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# semgrep reads this file in place of its default list, which leaves out
+# tests/ and so would let a test break a HISS rule unseen. Every standard
+# binds every file: only build output and local state are left out.
+.workingdir/
+build/
+dist/
+.venv/

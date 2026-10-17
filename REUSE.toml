@@ -13,6 +13,7 @@ path = [
     "README.md",
     ".gitignore",
     "requirements/dev.txt",
+    "requirements/semgrep.txt",
     "renovate.json",
 ]
 precedence = "aggregate"

@@ -19,6 +19,14 @@ ENV = .venv/$(notdir $(PYTHON))
 # The licence check is not part of the lock (see requirements/dev.in).
 REUSE ?= reuse
 
+# The declared scanners (tools/scanners.py). semgrep comes from its own lock in
+# an environment of its own; trivy is one static binary, taken from PATH here
+# and installed in CI from its release archive pinned by digest.
+SEMGREP_ENV = .venv/semgrep
+SEMGREP ?= $(CURDIR)/$(SEMGREP_ENV)/bin/semgrep
+TRIVY ?= trivy
+export SEMGREP TRIVY
+
 # Where `package` puts the built files.
 DIST ?= dist
 
@@ -31,7 +39,7 @@ export SOURCE_DATE_EPOCH
 # from running side by side.
 .NOTPARALLEL:
 
-.PHONY: verify-all verify-engine-pin verify fetch environment verify-static package verify-package-size verify-reproducible verify-python lock clean
+.PHONY: verify-all verify-engine-pin verify fetch environment semgrep-environment verify-static verify-scanners package verify-package-size verify-reproducible verify-python lock clean
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. It runs this
@@ -56,17 +64,20 @@ verify-engine-pin:
 		printf '%s\n' 'FAIL: no workflow declares PRAETOR_REF, so no engine is pinned.' >&2; exit 1; }
 
 # This repository's own checks; they need no engine. `fetch` is the only step
-# that reaches the package index; everything after it runs without a network.
-verify: fetch verify-static package verify-package-size verify-reproducible
+# that reaches the network (the package index, and ghcr.io for the trivy
+# database); everything after it runs offline.
+verify: fetch verify-static verify-scanners package verify-package-size verify-reproducible
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory verify-python PYTHON="$$python"; \
 	done
-	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Python versions, package, its size as the README states it, same bytes from a second build, a consumer install by hash, and its tests on $(PYTHONS).'
+	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Python versions, semgrep and trivy scans, package, its size as the README states it, same bytes from a second build, a consumer install by hash, and its tests on $(PYTHONS).'
 
 fetch:
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory environment PYTHON="$$python"; \
 	done
+	@$(MAKE) --no-print-directory semgrep-environment
+	'$(ENV)/bin/python' tools/scanners.py fetch-db
 
 # One environment per interpreter, holding exactly the packages of the lock:
 # pip refuses a package whose hash the lock does not name, and installs no
@@ -77,6 +88,15 @@ $(ENV)/.locked: requirements/dev.txt
 	'$(PYTHON)' -m venv '$(ENV)'
 	'$(ENV)/bin/python' -m pip install --disable-pip-version-check --require-hashes \
 		--only-binary=:all: -r requirements/dev.txt
+	touch '$@'
+
+# semgrep's environment, from its own lock in the same way.
+semgrep-environment: $(SEMGREP_ENV)/.locked
+$(SEMGREP_ENV)/.locked: requirements/semgrep.txt
+	rm -rf '$(SEMGREP_ENV)'
+	'$(PYTHON)' -m venv '$(SEMGREP_ENV)'
+	'$(SEMGREP_ENV)/bin/python' -m pip install --disable-pip-version-check --require-hashes \
+		--only-binary=:all: -r requirements/semgrep.txt
 	touch '$@'
 
 # Checks that read the source and do not depend on the interpreter running the
@@ -92,6 +112,19 @@ verify-static: environment
 	$(REUSE) lint
 	'$(ENV)/bin/python' tools/check_exceptions.py
 	'$(ENV)/bin/python' tools/check_python_versions.py
+
+# The two declared scanners. Each selftest plants findings in a scratch
+# directory first (every semgrep rule, one known pip advisory), so a scanner
+# that stopped reporting fails before its scan of this tree is trusted. The
+# semgrep rules are .config/semgrep/hiss.yml; trivy reads the locks under
+# requirements/ against the database `fetch` downloaded by digest.
+verify-scanners: environment
+	'$(SEMGREP)' --version
+	'$(TRIVY)' --version
+	'$(ENV)/bin/python' tools/scanners.py selftest semgrep
+	'$(ENV)/bin/python' tools/scanners.py check semgrep
+	'$(ENV)/bin/python' tools/scanners.py selftest trivy
+	'$(ENV)/bin/python' tools/scanners.py check trivy
 
 # One source distribution and one wheel, built once with the locked build
 # backend on the first interpreter. Every interpreter then tests this one
@@ -144,9 +177,11 @@ verify-python: environment
 # Regenerates the lock from requirements/dev.in. A release younger than three
 # days is not eligible.
 lock:
-	cd requirements && uv pip compile --universal --generate-hashes --python-version=3.11 \
-		--exclude-newer="$$(date -u -d '3 days ago' +%Y-%m-%dT00:00:00Z)" \
-		dev.in --output-file=dev.txt
+	cd requirements && for lock in dev semgrep; do \
+		uv pip compile --universal --generate-hashes --python-version=3.11 \
+			--exclude-newer="$$(date -u -d '3 days ago' +%Y-%m-%dT00:00:00Z)" \
+			$$lock.in --output-file=$$lock.txt || exit 1; \
+	done
 
 clean:
 	rm -rf .venv dist build src/*.egg-info .mypy_cache .ruff_cache .pytest_cache
