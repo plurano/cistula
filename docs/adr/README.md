@@ -8,5 +8,5 @@ record that supersedes it.
 | Number | Date | Title | Status |
 | :--- | :--- | :--- | :--- |
 | [0000](0000-template.md) | 2026-09-11 | ADR template | Accepted |
-| [0001](0001-release-job.md) | 2026-10-11 | Release job: one reproducible build, a dry run while the repository is private | Proposed |
+| [0001](0001-release-job.md) | 2026-10-11 | Release job: one reproducible build, a dry run while the repository is private | Accepted |
 | [0002](0002-grouped-flush.md) | 2026-10-17 | Grouped flush: one flush pass for a group of durable writes | Proposed |
