@@ -1,6 +1,6 @@
 # ADR-0001: Release job: one reproducible build, a dry run while the repository is private
 
-- **Status**: Proposed
+- **Status**: Accepted (2026-10-17, after the tag run of `v0.1.0`)
 - **Date**: 2026-10-11
 - **Authors**: lusoris
 
@@ -173,18 +173,24 @@ cosign verify-blob \
   --bundle SHA256SUMS.sigstore.json SHA256SUMS
 ```
 
-### Not yet measured
-
-Each point is settled by a run before this record is accepted, or with the
-change that adds the step.
-
-- Whether a tag run produces the files and the notices described here.
-- The certificate identity a signature made inside the called workflow
-  carries; the command above assumes the called workflow's path at the tag.
-  The check ships with a wrong identity that it refuses.
-
 ### Measured
 
+- **A tag run produces the files and the notices described here.** The
+  run of tag `v0.1.0` on `67c37d6` (run 39056294259) passed `build`,
+  `verify`, `pypi` and `draft`. PyPI serves the wheel and the source
+  distribution of version 0.1.0 with the hashes of the dispatch run on the
+  same commit (run 39055965284; wheel `69a9dff4…`, source distribution
+  `d2bda0d8…`), which the gate printed for that commit as well
+  (run 39055958066). The draft release holds the two files, `SHA256SUMS`,
+  `SHA256SUMS.sigstore.json` and both parts lists.
+- **A signature made inside the called workflow carries the called
+  workflow's identity.** The certificate in `SHA256SUMS.sigstore.json` of
+  that run names
+  `https://github.com/plurano/cistula/.github/workflows/release-build.yml@refs/tags/v0.1.0`
+  as subject and build signer, and `refs/tags/v0.1.0` as source ref. The
+  `cosign verify-blob` command above passes with that identity; in the
+  `verify` job, a signature checked against another workflow's identity and
+  changed checksums are refused.
 - **A dry run on `main` produces the files and the notice described here.**
   Two dispatch runs on `main` at `3c60bef` (runs 39053194183 and
   39053196215) passed. Each stored the wheel, the source distribution,
@@ -197,8 +203,9 @@ change that adds the step.
 - **The parts lists are not the same bytes on every run.** Between the two
   runs above, the SPDX file differs in `creationInfo.created` and
   `documentNamespace`, and the CycloneDX file in `metadata.timestamp` and
-  `serialNumber`; with those fields removed, both are equal. They stay outside
-  the pinned bytes.
+  `serialNumber`; with those fields removed, both are equal. The tag run
+  and the dispatch run on `67c37d6` differ in the same four fields only.
+  They stay outside the pinned bytes.
 - **The plan limit of attestations for a private repository no longer
   applies.** The repository is public since 2026-10-17, so the tag run signs
   and attests as a public one (Context, point 4).
