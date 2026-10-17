@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+# Pinned HISS invariant rules for the repository's Python and shell code, the
+# Python and bash rules of plurano/amussis .config/semgrep/hiss.yml. Run in
+# make verify-semgrep through tools/scanners.py (planted selftest, tree scan).
+rules:
+  - id: hiss-08-bash-eval
+    pattern: eval ...
+    message: "[HISS-08] eval prohibited. fix: build an argument array."
+    languages: [bash]
+    severity: ERROR
+
+  - id: hiss-08-python-eval
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+      - pattern: compile(...)
+    message: "[HISS-08] dynamic code execution prohibited. fix: parse structured data or dispatch on known names."
+    languages: [python]
+    severity: ERROR
+
+  - id: hiss-08-python-shell
+    pattern-either:
+      - pattern: subprocess.$F(..., shell=True, ...)
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+    message: "[HISS-08] a shell string is code built at run time. fix: pass an argument list with shell=False."
+    languages: [python]
+    severity: ERROR
+
+  - id: hiss-02-python-subprocess-without-timeout
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run(...)
+          - pattern: subprocess.check_output(...)
+          - pattern: subprocess.check_call(...)
+          - pattern: subprocess.call(...)
+      - pattern-not: subprocess.$F(..., timeout=$T, ...)
+    message: "[HISS-02] subprocess execution without timeout. fix: pass timeout=DEADLINE_SECONDS."
+    languages: [python]
+    severity: ERROR
+
+  - id: hiss-02-python-urlopen-without-timeout
+    patterns:
+      - pattern: urllib.request.urlopen(...)
+      - pattern-not: urllib.request.urlopen(..., timeout=$T, ...)
+    message: "[HISS-02] urllib.request.urlopen without timeout. fix: pass timeout=DEADLINE_SECONDS."
+    languages: [python]
+    severity: ERROR

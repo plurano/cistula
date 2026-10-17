@@ -51,12 +51,3 @@ register:
         kind: message
         format: json
         selector: invariants.*
-exceptions:
-  - rule: declared-linters
-    tool: semgrep
-    reason: the only Python rule of the pinned engine's semgrep set (hiss-08 eval/exec in .config/semgrep/hiss-invariants.yml) is what the praetorctl audit HISS-08 scan in make verify-all already refuses; a semgrep job needs semgrep in the hash-locked requirements/dev.txt first
-    expires: "2027-01-11"
-  - rule: declared-linters
-    tool: trivy
-    reason: the package has no runtime dependency to scan and its build and test tools come hash-locked from requirements/dev.txt under the update bot; a trivy filesystem job over requirements/dev.txt and the dev container image is due before this entry expires
-    expires: "2027-01-11"

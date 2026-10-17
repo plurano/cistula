@@ -199,8 +199,8 @@ make verify-all
 
 This is the whole gate, and CI runs the same target. It needs `python3.11`,
 `python3.12`, `python3.13` and `python3.14` on `PATH` (or `PYTHONS="..."` with full paths),
-`reuse` 6.2.0 and the standards engine. An interpreter or a tool that is
-missing fails the gate.
+`reuse` 6.2.0, `trivy` 0.76.0 (or `TRIVY=...`) and the standards engine. An
+interpreter or a tool that is missing fails the gate.
 
 The engine is the commit that `PRAETOR_REF` in
 [ci.yml](.github/workflows/ci.yml) pins, for the gate and for the Git hooks
@@ -213,7 +213,11 @@ no workflow declares the pin.
 1. One environment per interpreter is installed from `requirements/dev.txt`.
    Every package is pinned by hash; nothing else is installed.
 2. Format, lint, types, licence headers, the exception list and the list of
-   supported Python versions are checked once.
+   supported Python versions are checked once. Then
+   [tools/scanners.py](tools/scanners.py) runs semgrep with the rules in
+   [.config/semgrep/hiss.yml](.config/semgrep/hiss.yml) and trivy on both
+   locks. Each scanner first has to report the defects planted in a scratch
+   folder; a scanner that reports nothing there fails the gate.
 3. One source distribution and one wheel are built, and their sizes are
    checked against the figures under [Reproducible package](#reproducible-package).
 4. Every interpreter builds both once more. One differing byte fails.
@@ -228,8 +232,10 @@ no workflow declares the pin.
 
 `make verify` runs steps 1 to 5 and needs no engine.
 
-`make lock` regenerates `requirements/dev.txt` from `requirements/dev.in`. A
-release younger than three days is not eligible.
+`make lock` regenerates `requirements/dev.txt` from `requirements/dev.in`
+and `requirements/semgrep.txt` from `requirements/semgrep.in`. A release
+younger than three days is not eligible. semgrep has its own environment
+under `.venv/semgrep`, so its dependencies never pin those of the tests.
 
 Every public function has positive, negative and boundary tests. A test that
 guards a guarantee was seen failing once with the guarantee removed from the
