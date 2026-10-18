@@ -32,6 +32,7 @@ from cistula.files import (
     staged_path,
     write_bytes_atomic,
     write_json,
+    write_json_lines,
     write_text_atomic,
 )
 from cistula.process import run
@@ -1279,6 +1280,129 @@ def test_every_finite_number_is_written_and_reads_back_equal(tmp_path: Path, num
     write_json(path, {"score": number})
 
     assert read_json(path) == {"score": number}
+
+
+# --- write_json_lines ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("values", "content"),
+    [
+        ([], b""),
+        ([{}], b"{}\n"),
+        ([{"b": [1, 2], "a": "Zürich"}], '{"a":"Zürich","b":[1,2]}\n'.encode()),
+        ([1, "two\nlines", None, True, [], {"k": -1.5}], b'1\n"two\\nlines"\nnull\ntrue\n[]\n{"k":-1.5}\n'),
+        (["a\u2028b"], '"a\u2028b"\n'.encode()),
+    ],
+)
+def test_lines_writes_one_compact_sorted_row_per_value(tmp_path: Path, values: list[JsonValue], content: bytes) -> None:
+    path = tmp_path / "rows.jsonl"
+
+    write_json_lines(path, values)
+
+    assert path.read_bytes() == content
+
+
+def test_lines_writer_options_and_iterables(tmp_path: Path) -> None:
+    path = tmp_path / "rows.jsonl"
+
+    write_json_lines(path, ({"b": n, "a": "é"} for n in range(2)), sort_keys=False, ensure_ascii=True)
+
+    assert path.read_bytes() == b'{"b":0,"a":"\\u00e9"}\n{"b":1,"a":"\\u00e9"}\n'
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [],
+        [None],
+        [{"a": 1}, {"a": 1}],
+        [{"nested": [{"deep": [None, 1, "Grüße"]}]}, "", 0, sys.float_info.max, 5e-324],
+    ],
+)
+def test_written_lines_read_back_equal(tmp_path: Path, values: list[JsonValue]) -> None:
+    path = tmp_path / "round.jsonl"
+
+    write_json_lines(path, values)
+
+    assert read_json_lines(path) == values
+
+
+@pytest.mark.parametrize(
+    ("bad", "error"),
+    [(math.nan, ValueError), (math.inf, ValueError), ({"score": -math.inf}, ValueError), ({1, 2}, TypeError)],
+)
+def test_lines_value_json_cannot_represent_leaves_the_old_file_whole(
+    tmp_path: Path, bad: Any, error: type[Exception]
+) -> None:
+    path = tmp_path / "kept.jsonl"
+    path.write_bytes(b'{"old":true}\n')
+
+    with pytest.raises(error):
+        write_json_lines(path, [{"a": 1}, {"b": 2}, bad, {"c": 3}])
+
+    assert path.read_bytes() == b'{"old":true}\n'
+    assert names(tmp_path) == ["kept.jsonl"]
+
+
+def test_lines_iterable_that_fails_leaves_the_old_file_whole(tmp_path: Path) -> None:
+    path = tmp_path / "kept.jsonl"
+    path.write_bytes(b'{"old":true}\n')
+
+    def failing() -> Iterator[JsonValue]:
+        yield {"a": 1}
+        message = "producer failed"
+        raise RuntimeError(message)
+
+    with pytest.raises(RuntimeError, match="producer failed"):
+        write_json_lines(path, failing())
+
+    assert path.read_bytes() == b'{"old":true}\n'
+    assert names(tmp_path) == ["kept.jsonl"]
+
+
+def test_lines_value_json_cannot_represent_creates_no_file(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not JSON compliant"):
+        write_json_lines(tmp_path / "never.jsonl", [{"score": math.nan}])
+
+    assert names(tmp_path) == []
+
+
+def test_lines_value_json_cannot_represent_creates_no_directory(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not JSON compliant"):
+        write_json_lines(tmp_path / "new" / "never.jsonl", [1, math.inf], parents=True)
+
+    assert names(tmp_path) == []
+
+
+@pytest.mark.parametrize("values", ["[1]", b"[1]", bytearray(b"1"), memoryview(b"1"), {"a": 1}])
+def test_lines_writer_refuses_one_text_bytes_or_object(tmp_path: Path, values: Any) -> None:
+    with pytest.raises(TypeError, match="needs an iterable of values"):
+        write_json_lines(tmp_path / "never.jsonl", values)
+
+    assert names(tmp_path) == []
+
+
+def test_lines_writer_parents_and_keywords(tmp_path: Path) -> None:
+    path = tmp_path / "new" / "rows.jsonl"
+
+    with pytest.raises(FileNotFoundError):
+        write_json_lines(path, [1])
+    write_json_lines(path, [1], parents=True, durable=False)
+
+    assert path.read_bytes() == b"1\n"
+    parameters = inspect.signature(write_json_lines).parameters
+    for name in ("sort_keys", "ensure_ascii", "durable", "parents"):
+        assert parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_lines_writer_flushes_when_durable(tmp_path: Path, flushed: list[str]) -> None:
+    write_json_lines(tmp_path / "rows.jsonl", [1, 2])
+    assert flushed == ["file", "directory"]
+    flushed.clear()
+
+    write_json_lines(tmp_path / "rows.jsonl", [1, 2], durable=False)
+    assert flushed == []
 
 
 # --- the block writers: open_bytes_atomic, open_text_atomic, staged_path ---------------

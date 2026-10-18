@@ -18,6 +18,9 @@ versions follow [PEP 440](https://peps.python.org/pep-0440/).
   document per line) with the checks of `read_json`; a bad row raises
   `JsonLineError`, which names its line number. Blank lines are skipped
   (#6).
+- `files.write_json_lines` replaces a JSON Lines file in one step, one
+  compact document per line; a value JSON cannot represent is refused
+  before the file is opened (#6).
 
 ### Fixed
 
