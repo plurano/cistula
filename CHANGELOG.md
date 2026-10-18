@@ -15,6 +15,12 @@ versions follow [PEP 440](https://peps.python.org/pep-0440/).
 
 - Python 3.15 is supported and tested.
 
+### Fixed
+
+- `process.run` refuses to signal a process group of 0, 1, its own or a
+  non-integer id, so a test double whose pid reads as 1 no longer reaches every
+  process of the user (#42).
+
 ## [0.1.0] - 2026-10-17
 
 ### Added

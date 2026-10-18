@@ -146,7 +146,13 @@ def _arguments(argv: Sequence[str | os.PathLike[str]]) -> tuple[str, ...]:
 
 
 def _signal_group(group: int, number: signal.Signals) -> None:
-    """Send `number` to every process of `group`; a group that is gone is fine."""
+    """Send `number` to every process of `group`; a group that is gone is fine.
+
+    A process group of 0, 1, the caller's own group, or a non-integer is refused.
+    """
+    if not isinstance(group, int) or isinstance(group, bool) or group <= 1 or group == os.getpgrp():
+        message = f"a process group must be another group's id above 1, not {group!r}"
+        raise ValueError(message)
     try:
         os.killpg(group, number)
     except ProcessLookupError:
