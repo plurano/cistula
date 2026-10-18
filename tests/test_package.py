@@ -35,6 +35,7 @@ PUBLIC = {
     "staged_path",
     "write_bytes_atomic",
     "write_json",
+    "write_json_lines",
     "write_text_atomic",
 }
 

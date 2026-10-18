@@ -35,7 +35,7 @@ import stat
 from typing import TYPE_CHECKING, NamedTuple, TypeAlias, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
 
 __all__ = [
     "DuplicateKeyError",
@@ -50,6 +50,7 @@ __all__ = [
     "staged_path",
     "write_bytes_atomic",
     "write_json",
+    "write_json_lines",
     "write_text_atomic",
 ]
 
@@ -431,6 +432,39 @@ def write_json(  # noqa: PLR0913 - one keyword per independent setting of the wr
     """
     text = json.dumps(value, indent=indent, sort_keys=sort_keys, ensure_ascii=ensure_ascii, allow_nan=False)
     write_text_atomic(path, text + "\n", durable=durable, parents=parents)
+
+
+def write_json_lines(  # noqa: PLR0913 - one keyword per independent setting of the written file
+    path: _Path,
+    values: Iterable[JsonValue],
+    *,
+    sort_keys: bool = True,
+    ensure_ascii: bool = False,
+    durable: bool = True,
+    parents: bool = False,
+) -> None:
+    """Replace the file at `path` with `values` as UTF-8 JSON Lines in one step.
+
+    Each value becomes one compact document on its own line, and every line
+    ends with a newline; no values give an empty file. `sort_keys` and
+    `ensure_ascii` work as for `write_json`. Every value is serialised before
+    the file is opened, so a value JSON cannot represent (NaN and the two
+    infinities raise `ValueError`, any other type raises `TypeError`) leaves
+    `path` as it was. `values` is a sequence or another iterable of values,
+    never one text, bytes or object, which raise `TypeError`. Appending is not
+    offered: an append cannot be made in one step. See `write_bytes_atomic`
+    for what "in one step" guarantees and for `durable` and `parents`.
+    """
+    if isinstance(values, (str, bytes, bytearray, memoryview, dict)):
+        message = f"write_json_lines needs an iterable of values, not one {type(values).__name__}"
+        raise TypeError(message)
+    rows = [
+        json.dumps(value, separators=(",", ":"), sort_keys=sort_keys, ensure_ascii=ensure_ascii, allow_nan=False)
+        for value in values
+    ]
+    with open_text_atomic(path, durable=durable, parents=parents) as handle:
+        for row in rows:
+            handle.write(row + "\n")
 
 
 @contextlib.contextmanager
