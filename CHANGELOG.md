@@ -14,6 +14,10 @@ versions follow [PEP 440](https://peps.python.org/pep-0440/).
 ### Added
 
 - Python 3.15 is supported and tested.
+- `files.read_json_lines` and `files.loads_json_lines` read JSON Lines (one
+  document per line) with the checks of `read_json`; a bad row raises
+  `JsonLineError`, which names its line number. Blank lines are skipped
+  (#6).
 
 ### Fixed
 

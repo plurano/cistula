@@ -44,7 +44,7 @@ network.
 | Module | What it does |
 | --- | --- |
 | `process` | `run` starts a command under a time limit the caller must state. `child_env` builds the environment for such a child. |
-| `files` | `read_json` and `loads_json` refuse a repeated key and a number JSON does not have. `write_bytes_atomic`, `write_text_atomic` and `write_json` replace a file in one step. `open_bytes_atomic`, `open_text_atomic` and `staged_path` do that for content written in a `with` block. Files that can be made again (caches, per-item results) take `durable=False`; everything else keeps the default, which costs milliseconds per file (see Guarantees). |
+| `files` | `read_json` and `loads_json` refuse a repeated key and a number JSON does not have. `read_json_lines` and `loads_json_lines` read JSON Lines with the same checks and name the line of a bad row. `write_bytes_atomic`, `write_text_atomic` and `write_json` replace a file in one step. `open_bytes_atomic`, `open_text_atomic` and `staged_path` do that for content written in a `with` block. Files that can be made again (caches, per-item results) take `durable=False`; everything else keeps the default, which costs milliseconds per file (see Guarantees). |
 | `digest` | `sha256_file`, `sha256_bytes` and `sha256_text`. |
 
 ```python
@@ -317,7 +317,7 @@ things make it so:
 - **No compression.** Both files store their members uncompressed
   ([setup.cfg](setup.cfg) for the wheel). zlib and zlib-ng give different
   bytes for the same input, and interpreters are built with either. The price
-  is size: about 307 kB and 66 kB instead of 63 kB and 25 kB.
+  is size: about 348 kB and 73 kB instead of 71 kB and 25 kB.
   [tools/check_package_size.py](tools/check_package_size.py) measures the
   four sizes in the gate (`make verify-package-size`) and fails when a figure
   in this sentence is off by more than a tenth.

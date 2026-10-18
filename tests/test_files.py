@@ -22,10 +22,13 @@ import pytest
 
 from cistula.files import (
     DuplicateKeyError,
+    JsonLineError,
     loads_json,
+    loads_json_lines,
     open_bytes_atomic,
     open_text_atomic,
     read_json,
+    read_json_lines,
     staged_path,
     write_bytes_atomic,
     write_json,
@@ -361,6 +364,109 @@ def test_read_refuses_a_byte_order_mark(tmp_path: Path) -> None:
 
     with pytest.raises(json.JSONDecodeError):
         read_json(path)
+
+
+# --- loads_json_lines, read_json_lines ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "values"),
+    [
+        ("", []),
+        ("\n", []),
+        ('{"a": 1}', [{"a": 1}]),
+        ('{"a": 1}\n', [{"a": 1}]),
+        ('{"a": 1}\r\n[2, null]\r\n', [{"a": 1}, [2, None]]),
+        ('1\n"two"\nnull\ntrue\n', [1, "two", None, True]),
+        ('{"a": 1}\n\n  \t\r\n{"b": 2}\n\n', [{"a": 1}, {"b": 2}]),
+        ('{"s": "a\u2028b\u0085c"}\n', [{"s": "a\u2028b\u0085c"}]),
+    ],
+)
+def test_lines_reads_one_value_per_row(text: str, values: list[JsonValue]) -> None:
+    assert loads_json_lines(text) == values
+
+
+@pytest.mark.parametrize(
+    ("text", "line", "cause"),
+    [
+        ("{", 1, json.JSONDecodeError),
+        ('{"a": 1}\n{"b": \n{"c": 3}\n', 2, json.JSONDecodeError),
+        ('{"a": 1}\n\n\n{"a": 1, "a": 2}\n', 4, DuplicateKeyError),
+        ("1\n2\n[NaN]", 3, ValueError),
+        ("1\n[1e999]\n", 2, ValueError),
+        ('{"a":\n1}\n', 1, json.JSONDecodeError),
+        ("1 2\n", 1, json.JSONDecodeError),
+        ("\ufeff1\n", 1, json.JSONDecodeError),
+    ],
+)
+def test_lines_bad_row_names_its_line_and_keeps_its_error(text: str, line: int, cause: type[ValueError]) -> None:
+    with pytest.raises(JsonLineError, match=rf"^line {line}: ") as raised:
+        loads_json_lines(text)
+
+    assert raised.value.line == line
+    assert isinstance(raised.value.__cause__, cause)
+    assert isinstance(raised.value, ValueError)
+
+
+def test_lines_keywords_lift_the_same_checks_as_loads_json() -> None:
+    assert loads_json_lines('{"a": 1, "a": 2}\n', unique_keys=False) == [{"a": 2}]
+    assert same(loads_json_lines("[NaN]\n", finite_numbers=False), [[math.nan]])
+    with pytest.raises(JsonLineError):
+        loads_json_lines('{"a": NaN, "a": 1}\n', finite_numbers=False)
+
+
+def test_lines_reader_keywords_are_keyword_only() -> None:
+    for function in (loads_json_lines, read_json_lines):
+        parameters = inspect.signature(function).parameters
+        assert parameters["unique_keys"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert parameters["finite_numbers"].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+@pytest.mark.parametrize("value", [b"1\n", bytearray(b"1\n"), None, ["1"]])
+def test_lines_needs_text(value: Any) -> None:
+    with pytest.raises(TypeError, match="loads_json_lines needs text"):
+        loads_json_lines(value)
+
+
+def test_lines_rows_written_by_write_json_read_back(tmp_path: Path) -> None:
+    rows: list[JsonValue] = [{"name": "Zürich", "n": 1}, [1.5, None], "x"]
+    path = tmp_path / "rows.jsonl"
+    path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
+
+    assert read_json_lines(path) == rows
+    assert read_json_lines(str(path)) == rows
+
+
+def test_read_lines_empty_file_is_no_rows(tmp_path: Path) -> None:
+    path = tmp_path / "empty.jsonl"
+    path.write_bytes(b"")
+
+    assert read_json_lines(path) == []
+
+
+def test_read_lines_bad_row_names_its_line(tmp_path: Path) -> None:
+    path = tmp_path / "rows.jsonl"
+    path.write_text('{"a": 1}\n{"a": 1, "a": 2}\n', encoding="utf-8")
+
+    with pytest.raises(JsonLineError, match=r"^line 2: ") as raised:
+        read_json_lines(path)
+    assert isinstance(raised.value.__cause__, DuplicateKeyError)
+    assert read_json_lines(path, unique_keys=False) == [{"a": 1}, {"a": 2}]
+
+
+def test_read_lines_refuses_bytes_that_are_not_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "latin.jsonl"
+    path.write_bytes('{"name": "Zürich"}\n'.encode("latin-1"))
+
+    with pytest.raises(UnicodeDecodeError):
+        read_json_lines(path)
+
+
+def test_read_lines_missing_file_and_directory(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        read_json_lines(tmp_path / "absent.jsonl")
+    with pytest.raises(IsADirectoryError):
+        read_json_lines(tmp_path)
 
 
 def test_every_content_error_is_a_value_error(tmp_path: Path) -> None:

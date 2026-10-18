@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: EUPL-1.2
 """Read JSON strictly and write files so that a reader never sees half of one.
 
-The readers decode UTF-8 and refuse two things the standard library accepts
+The readers decode UTF-8, read one document or JSON Lines (one document per
+line), and refuse two things the standard library accepts
 silently: an object that names the same key twice (it keeps the last value)
 and a number JSON does not have (NaN, an infinity, a number too large for a
 float).
@@ -38,11 +39,14 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DuplicateKeyError",
+    "JsonLineError",
     "JsonValue",
     "loads_json",
+    "loads_json_lines",
     "open_bytes_atomic",
     "open_text_atomic",
     "read_json",
+    "read_json_lines",
     "staged_path",
     "write_bytes_atomic",
     "write_json",
@@ -71,6 +75,20 @@ def _unique(pairs: list[tuple[str, JsonValue]]) -> dict[str, JsonValue]:
             raise DuplicateKeyError(key)
         found[key] = value
     return found
+
+
+class JsonLineError(ValueError):
+    """One row of a JSON Lines text is not a JSON document the reader accepts.
+
+    `line` is the 1-based number of the row in the text; the error that the
+    row raised (`DuplicateKeyError`, `json.JSONDecodeError` or another
+    `ValueError`) is its `__cause__`.
+    """
+
+    def __init__(self, line: int, cause: ValueError) -> None:
+        """Record the row number `line` and the error the row raised."""
+        super().__init__(f"line {line}: {cause}")
+        self.line = line
 
 
 def _refuse_constant(name: str) -> float:
@@ -130,6 +148,45 @@ def read_json(path: _Path, *, unique_keys: bool = True, finite_numbers: bool = T
     with open(path, "rb") as handle:
         text = handle.read().decode("utf-8")
     return loads_json(text, unique_keys=unique_keys, finite_numbers=finite_numbers)
+
+
+def loads_json_lines(text: str, *, unique_keys: bool = True, finite_numbers: bool = True) -> list[JsonValue]:
+    """Parse JSON Lines text, one document per line, strictly.
+
+    Each row is read as `loads_json` reads a document, with the same two
+    keywords. A row that fails raises `JsonLineError`, which names the row's
+    line number and carries the row's own error as `__cause__`.
+
+    Rows end at a line feed; a carriage return before it and a last row
+    without one are accepted. A line holding nothing but spaces, tabs and a
+    carriage return is skipped and still counts for the line numbers. All
+    rows are parsed before the list is returned, so a bad row raises before
+    the caller sees any value.
+    """
+    if not isinstance(text, str):
+        message = f"loads_json_lines needs text, not {type(text).__name__}; read_json_lines reads a file"
+        raise TypeError(message)
+    values: list[JsonValue] = []
+    for number, row in enumerate(text.split("\n"), start=1):
+        if not row.strip(" \t\r"):
+            continue
+        try:
+            values.append(loads_json(row, unique_keys=unique_keys, finite_numbers=finite_numbers))
+        except ValueError as error:
+            raise JsonLineError(number, error) from error
+    return values
+
+
+def read_json_lines(path: _Path, *, unique_keys: bool = True, finite_numbers: bool = True) -> list[JsonValue]:
+    """Read a UTF-8 JSON Lines file strictly; see `loads_json_lines`.
+
+    A bad row raises `JsonLineError` with its line number. Bytes that are not
+    UTF-8 raise `UnicodeDecodeError`; a byte-order mark makes the first row a
+    bad row. A missing or unreadable file raises `OSError`.
+    """
+    with open(path, "rb") as handle:
+        text = handle.read().decode("utf-8")
+    return loads_json_lines(text, unique_keys=unique_keys, finite_numbers=finite_numbers)
 
 
 def _sync_directory(directory: str) -> None:
