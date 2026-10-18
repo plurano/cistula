@@ -1368,6 +1368,13 @@ def test_lines_value_json_cannot_represent_creates_no_file(tmp_path: Path) -> No
     assert names(tmp_path) == []
 
 
+def test_lines_value_json_cannot_represent_creates_no_directory(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not JSON compliant"):
+        write_json_lines(tmp_path / "new" / "never.jsonl", [1, math.inf], parents=True)
+
+    assert names(tmp_path) == []
+
+
 @pytest.mark.parametrize("values", ["[1]", b"[1]", bytearray(b"1"), memoryview(b"1"), {"a": 1}])
 def test_lines_writer_refuses_one_text_bytes_or_object(tmp_path: Path, values: Any) -> None:
     with pytest.raises(TypeError, match="needs an iterable of values"):
