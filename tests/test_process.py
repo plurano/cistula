@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import importlib.util
 import math
 import os
 import signal
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import unittest.mock
 from pathlib import Path
 from typing import Any
 
@@ -617,3 +619,85 @@ def test_child_env_feeds_run() -> None:
     )
 
     assert result.stdout == "seen False\n"
+
+
+# --- signal group guard -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "group",
+    [0, 1, -1, True, False, unittest.mock.MagicMock().pid, os.getpgrp(), 1.0, "5"],
+)
+def test_signal_group_refuses_unsafe_and_invalid_groups(group: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: list[tuple[int, signal.Signals]] = []
+    monkeypatch.setattr(process.os, "killpg", lambda grp, num: recorded.append((grp, num)))  # type: ignore[attr-defined]
+
+    with pytest.raises(ValueError, match="a process group must be another group's id above 1") as failure:
+        process._signal_group(group, signal.SIGTERM)  # noqa: SLF001
+
+    assert repr(group) in str(failure.value)
+    assert recorded == []
+
+
+@pytest.mark.parametrize("group", [2, 2**22 + 7])
+def test_signal_group_signals_valid_groups(group: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    if group == os.getpgrp():
+        pytest.skip(f"group {group} equals caller's own process group")
+    recorded: list[tuple[int, signal.Signals]] = []
+    monkeypatch.setattr(process.os, "killpg", lambda grp, num: recorded.append((grp, num)))  # type: ignore[attr-defined]
+
+    process._signal_group(group, signal.SIGTERM)  # noqa: SLF001
+
+    assert recorded == [(group, signal.SIGTERM)]
+
+
+def test_signal_group_swallows_process_lookup_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    group = 2 if os.getpgrp() != 2 else 3
+    recorded: list[tuple[int, signal.Signals]] = []
+
+    def failing_killpg(grp: int, num: signal.Signals) -> None:
+        recorded.append((grp, num))
+        raise ProcessLookupError
+
+    monkeypatch.setattr(process.os, "killpg", failing_killpg)  # type: ignore[attr-defined]
+
+    process._signal_group(group, signal.SIGTERM)  # noqa: SLF001
+
+    assert recorded == [(group, signal.SIGTERM)]
+
+
+def test_signal_group_mutant_proves_guard_protects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_path = Path(process.__file__)
+    source = source_path.read_text(encoding="utf-8")
+    guard = (
+        "    if not isinstance(group, int) or isinstance(group, bool) or group <= 1 or group == os.getpgrp():\n"
+        '        message = f"a process group must be another group\'s id above 1, not {group!r}"\n'
+        "        raise ValueError(message)\n"
+    )
+    assert guard in source
+    mutant_source = source.replace(guard, "")
+    assert mutant_source != source
+
+    mutant_file = tmp_path / "mutant_process.py"
+    mutant_file.write_text(mutant_source, encoding="utf-8")
+
+    spec = importlib.util.spec_from_file_location("mutant_process", mutant_file)
+    assert spec is not None
+    assert spec.loader is not None
+    mutant = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, mutant)
+    spec.loader.exec_module(mutant)
+
+    recorded: list[tuple[int, int]] = []
+
+    def recorder(grp: int, sig: int) -> None:
+        recorded.append((grp, sig))
+
+    monkeypatch.setattr(mutant.os, "killpg", recorder)
+    # Two barriers, as the guard is gone here: the stub must be in place, and
+    # signal 0 only probes, so even a real call would deliver nothing.
+    assert mutant.os.killpg is recorder
+
+    mutant._signal_group(1, 0)  # noqa: SLF001
+
+    assert recorded == [(1, 0)]
