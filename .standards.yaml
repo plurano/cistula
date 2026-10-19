@@ -3,7 +3,7 @@ version: 1
 repository:
   owner: plurano
   name: cistula
-  visibility: private
+  visibility: public
   description: Shared Python helpers of the Plurano framework family
   homepage: ""
   topics: []
