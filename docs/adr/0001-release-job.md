@@ -209,6 +209,11 @@ cosign verify-blob \
 - **The plan limit of attestations for a private repository no longer
   applies.** The repository is public since 2026-10-17, so the tag run signs
   and attests as a public one (Context, point 4).
+- **The draft step calls the shared Horistes workflow (2026-10-21).**
+  The inline `draft` job was replaced by a call of
+  `plurano/horistes/.github/workflows/draft-release.yml` (ADR-0052 there).
+  The shared workflow adds `--prerelease` for a tag with a hyphen (such as
+  `v1.0.0-rc.1`), which the old cistula job did not (Public phase, point 4).
 
 ## Consequences
 
