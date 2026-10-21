@@ -157,26 +157,13 @@ jobs:
         with:
           packages-dir: pypi-dist/
 
+  # Shared workflow of Horistes (Greek horistes, the boundary commissioner who
+  # fixes limits; pronounced ho-RIS-tees), ADR-0052 there.
   draft:
     name: Store the files in a draft release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, verify, pypi]
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
     permissions:
       contents: write
-    steps:
-      - name: Fetch the release files
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release-files
-          path: dist
-
-      - name: Create the draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          gh release create "$TAG" --draft --verify-tag --title "$TAG" \
-            --generate-notes dist/*
+    # yamllint disable-line rule:line-length
+    uses: plurano/horistes/.github/workflows/draft-release.yml@0fa7a3aeab2b68c3d937fbe51054b1899a0afbcd  # 2026-10-21
