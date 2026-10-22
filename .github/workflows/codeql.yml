@@ -1,0 +1,67 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+# Code scanning: CodeQL analyses the workflows and the Python source and
+# tools of this repository and uploads findings to code scanning. Neither
+# language is built, so the analysis runs with build-mode none. The job is
+# no part of the verification gate and no required check; it runs on a pull
+# request that changes what it analyses, on main, once a week and by hand.
+name: Code scanning
+
+'on':
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "**/*.py"
+      - ".github/workflows/**"
+      - ".github/actions/**"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 3 * * 2"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write  # the findings go to the forge's code scanning
+    steps:
+      - name: Stop on a draft pull request
+        if: github.event.pull_request.draft == true
+        shell: bash
+        env:
+          TITLE: Gate not run on a draft
+          MESSAGE: >-
+            The gate did not run because the pull request is a draft.
+            It runs when the pull request is marked ready for review.
+        run: |
+          echo "::error title=$TITLE::$MESSAGE"
+          echo "$MESSAGE" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Check out
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up CodeQL
+        # yamllint disable-line rule:line-length
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee  # v4.39.0
+        with:
+          languages: actions, python
+          build-mode: none
+
+      - name: Analyse and upload the findings
+        # yamllint disable-line rule:line-length
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee  # v4.39.0
