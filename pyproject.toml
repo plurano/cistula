@@ -5,7 +5,7 @@
 # without isolation inside the environment that requirements/dev.txt pins by
 # hash, so the setuptools that runs is the locked one.
 [build-system]
-requires = ["setuptools==84.0.0"]
+requires = ["setuptools==84.1.0"]
 build-backend = "setuptools.build_meta"
 
 # Cistula (KIS-tu-la): Latin for a small chest of tools. Repository,
