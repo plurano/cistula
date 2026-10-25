@@ -13,8 +13,10 @@
                       cached database; each lock has to be scanned
 
 The database digest is pinned in one place, TRIVY_DB_DIGEST below, which the
-update bot reads (renovate.json). Ported from plurano/amussis tools/scanners.py,
-for Python and shell sources and pip locks.
+update bot reads (renovate.json). The vulnerability database is cached under
+`<XDG_CACHE_HOME or ~/.cache>/plurano/trivy-db/<digest>`, so one download per
+digest is shared by every checkout and gate copy. Ported from plurano/amussis
+tools/scanners.py, for Python and shell sources and pip locks.
 
 Exit status: 0 clean or selftest passed, 1 findings or selftest failed, 2 the
 check itself could not run.
@@ -25,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -124,6 +127,14 @@ def parse(done: subprocess.CompletedProcess[str], tool: str) -> dict[str, Any]:
     return data
 
 
+def default_cache() -> Path:
+    """Return the shared cache directory for the pinned trivy database."""
+    base = os.environ.get("XDG_CACHE_HOME")
+    cache_home = Path(base) if base else Path.home() / ".cache"
+    digest_hex = TRIVY_DB_DIGEST.removeprefix("sha256:")
+    return cache_home / "plurano" / "trivy-db" / digest_hex
+
+
 def stamp_of(cache: Path) -> str:
     """Return the digest the cached database was fetched at, empty when none was."""
     stamp = cache / "db.stamp"
@@ -135,15 +146,39 @@ def fetch_db(cache: Path, trivy: str) -> int:
     if stamp_of(cache) == TRIVY_DB_DIGEST:
         out(f"trivy database already at {TRIVY_DB_DIGEST}")
         return 0
-    cache.mkdir(parents=True, exist_ok=True)
     say_version(trivy)
-    argv = [trivy, "fs", "--cache-dir", str(cache), "--db-repository", f"{TRIVY_DB_REPOSITORY}@{TRIVY_DB_DIGEST}"]
-    # trivy stops the download at its own --timeout (default 5m), so it gets the same bound
-    done = run([*argv, "--download-db-only", "--timeout", f"{FETCH_SECONDS}s"], FETCH_SECONDS)
-    if done.returncode != 0:
-        message = f"trivy database download exited {done.returncode}: {done.stderr.strip()}"
-        raise CheckError(message)
-    (cache / "db.stamp").write_text(f"{TRIVY_DB_DIGEST}\n", encoding="utf-8")
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(dir=cache.parent, prefix=".fetch-"))
+    except OSError as error:
+        message = f"could not prepare cache directory in {cache.parent}: {error}"
+        raise CheckError(message) from error
+    renamed = False
+    try:
+        argv = [trivy, "fs", "--cache-dir", str(tmp), "--db-repository", f"{TRIVY_DB_REPOSITORY}@{TRIVY_DB_DIGEST}"]
+        # trivy stops the download at its own --timeout (default 5m), so it gets the same bound
+        done = run([*argv, "--download-db-only", "--timeout", f"{FETCH_SECONDS}s"], FETCH_SECONDS)
+        if done.returncode != 0:
+            message = f"trivy database download exited {done.returncode}: {done.stderr.strip()}"
+            raise CheckError(message)
+        (tmp / "db.stamp").write_text(f"{TRIVY_DB_DIGEST}\n", encoding="utf-8")
+        if cache.exists() and stamp_of(cache) != TRIVY_DB_DIGEST:
+            if cache.is_dir():
+                shutil.rmtree(cache)
+            else:
+                cache.unlink()
+        try:
+            os.rename(tmp, cache)
+            renamed = True
+        except OSError as error:
+            if stamp_of(cache) == TRIVY_DB_DIGEST:
+                out(f"PASS: trivy database fetched at {TRIVY_DB_DIGEST}")
+                return 0
+            message = f"could not rename {tmp} to {cache}: {error}"
+            raise CheckError(message) from error
+    finally:
+        if not renamed and tmp.exists():
+            shutil.rmtree(tmp, ignore_errors=True)
     out(f"PASS: trivy database fetched at {TRIVY_DB_DIGEST}")
     return 0
 
@@ -263,7 +298,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("action", choices=("fetch-db", "selftest", "check"))
     parser.add_argument("target", nargs="?", choices=("semgrep", "trivy"))
-    parser.add_argument("--cache-dir", type=Path, default=Path("build/trivy-cache"))
+    parser.add_argument("--cache-dir", type=Path, default=default_cache())
     parser.add_argument("--config", type=Path, default=Path(".config/semgrep/hiss.yml"))
     args = parser.parse_args()
     if (args.action == "fetch-db") == (args.target is not None):

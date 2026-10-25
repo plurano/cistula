@@ -117,7 +117,9 @@ verify-static: environment
 # directory first (every semgrep rule, one known pip advisory), so a scanner
 # that stopped reporting fails before its scan of this tree is trusted. The
 # semgrep rules are .config/semgrep/hiss.yml; trivy reads the locks under
-# requirements/ against the database `fetch` downloaded by digest.
+# requirements/ against the database `fetch` downloaded by digest into the
+# shared cache (<XDG_CACHE_HOME or ~/.cache>/plurano/trivy-db/<digest>), so
+# one download per digest is shared by every checkout and gate copy.
 verify-scanners: environment
 	'$(SEMGREP)' --version
 	'$(TRIVY)' --version
