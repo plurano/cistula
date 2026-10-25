@@ -184,12 +184,13 @@ verify-python: environment
 	COVERAGE_FILE='$(ENV)/coverage' '$(ENV)/bin/python' -m coverage run -m pytest
 	COVERAGE_FILE='$(ENV)/coverage' '$(ENV)/bin/python' -m coverage report
 
-# Regenerates the lock from requirements/dev.in. A release younger than three
-# days is not eligible.
+# Regenerates the locks from requirements/*.in. A release younger than three
+# days is not eligible. The age is written as a duration, so the command in
+# the lock header, which Renovate replays to recompile a lock, stays valid.
 lock:
 	cd requirements && for lock in dev semgrep; do \
 		uv pip compile --universal --generate-hashes --python-version=3.11 \
-			--exclude-newer="$$(date -u -d '3 days ago' +%Y-%m-%dT00:00:00Z)" \
+			--exclude-newer=P3D \
 			$$lock.in --output-file=$$lock.txt || exit 1; \
 	done
 

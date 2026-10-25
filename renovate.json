@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
-    "Every value comes from the family's shared preset, the default.json of Horistes (Greek horistes, the boundary commissioner who fixes limits; pronounced ho-RIS-tees), the shared CI repository. Nothing is set here."
+    "Every value comes from the family's shared preset, the default.json of Horistes (Greek horistes, the boundary commissioner who fixes limits; pronounced ho-RIS-tees), the shared CI repository. Only this repository's own files are set here."
   ],
   "extends": [
     "github>plurano/horistes"
@@ -27,7 +27,7 @@
       ]
     },
     {
-      "description": "setuptools is pinned twice, as the build requirement in pyproject.toml and in the tool lock that builds without isolation; both move in one pull request",
+      "description": "setuptools is pinned twice, as the build requirement in pyproject.toml and in the tool lock that builds without isolation; both move in one pull request (a security update gets one branch per package anyway)",
       "matchPackageNames": [
         "setuptools"
       ],
@@ -50,7 +50,7 @@
     }
   ],
   "pip-compile": {
-    "description": "Lock files compiled by uv pip compile (make lock): Renovate reads the command from each lock header, bumps the pin in the .in source and recompiles the lock",
+    "description": "Lock files compiled by uv pip compile (make lock): Renovate reads the command from each lock header, bumps the pin in the .in source and runs that command again; the header holds the release age as a duration (P3D), so the command stays valid",
     "managerFilePatterns": [
       "/^requirements/[^/]+\\.txt$/"
     ]
