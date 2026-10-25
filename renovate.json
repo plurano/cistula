@@ -25,6 +25,13 @@
       "schedule": [
         "before 4am on monday"
       ]
+    },
+    {
+      "description": "setuptools is pinned twice, as the build requirement in pyproject.toml and in the tool lock that builds without isolation; both move in one pull request",
+      "matchPackageNames": [
+        "setuptools"
+      ],
+      "groupName": "setuptools"
     }
   ],
   "customManagers": [
@@ -41,5 +48,11 @@
       "datasourceTemplate": "docker",
       "currentValueTemplate": "2"
     }
-  ]
+  ],
+  "pip-compile": {
+    "description": "Lock files compiled by uv pip compile (make lock): Renovate reads the command from each lock header, bumps the pin in the .in source and recompiles the lock",
+    "managerFilePatterns": [
+      "/^requirements/[^/]+\\.txt$/"
+    ]
+  }
 }
