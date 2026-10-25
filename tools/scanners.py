@@ -138,7 +138,8 @@ def fetch_db(cache: Path, trivy: str) -> int:
     cache.mkdir(parents=True, exist_ok=True)
     say_version(trivy)
     argv = [trivy, "fs", "--cache-dir", str(cache), "--db-repository", f"{TRIVY_DB_REPOSITORY}@{TRIVY_DB_DIGEST}"]
-    done = run([*argv, "--download-db-only"], FETCH_SECONDS)
+    # trivy stops the download at its own --timeout (default 5m), so it gets the same bound
+    done = run([*argv, "--download-db-only", "--timeout", f"{FETCH_SECONDS}s"], FETCH_SECONDS)
     if done.returncode != 0:
         message = f"trivy database download exited {done.returncode}: {done.stderr.strip()}"
         raise CheckError(message)
