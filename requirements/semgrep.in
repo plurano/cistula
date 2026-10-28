@@ -5,4 +5,4 @@
 # of its own: its dependency tree is large and pins versions the gate's tools
 # do not need, so it stays out of dev.in. semgrep.txt is its lock, compiled
 # the same way as dev.txt by `make lock`.
-semgrep==1.180.0
+semgrep==1.182.1
