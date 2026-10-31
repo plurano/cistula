@@ -14,6 +14,6 @@
 build==1.6.1
 coverage==7.17.0
 mypy==2.4.0
-pytest==9.1.1
+pytest==9.2.0
 ruff==0.16.10
 setuptools==84.2.1
