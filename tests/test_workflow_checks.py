@@ -54,10 +54,14 @@ def _indent(line: str) -> int:
     return len(line) - len(line.lstrip())
 
 
+def workflow_lines(workflow: str) -> list[str]:
+    with open(os.path.join(REPOSITORY, ".github", "workflows", workflow), encoding="utf-8") as handle:
+        return handle.read().splitlines()
+
+
 def run_block(workflow: str, step: str) -> str:
     """Return the `run: |` text of the one step named `step` in `.github/workflows/<workflow>`."""
-    with open(os.path.join(REPOSITORY, ".github", "workflows", workflow), encoding="utf-8") as handle:
-        lines = handle.read().splitlines()
+    lines = workflow_lines(workflow)
     starts = [number for number, line in enumerate(lines) if line.strip() == f"- name: {step}"]
     assert len(starts) == 1, f"{workflow} names the step {step!r} {len(starts)} times"
     rest = lines[starts[0] + 1 :]
@@ -290,7 +294,15 @@ def _on_block(lines: list[str]) -> list[str]:
     return block
 
 
-def test_every_required_check_reports_in_a_merge_queue() -> None:
+def callee_job_names() -> dict[str, list[str]]:
+    # Reviewed names for default inputs, keyed by the entire pinned reference.
+    # A pin bump requires reviewing the callee again, never a network fetch here.
+    with open(os.path.join(REPOSITORY, "tests", "reusable_workflow_jobs.json"), encoding="utf-8") as handle:
+        names: dict[str, list[str]] = json.load(handle)
+    return names
+
+
+def required_checks() -> list[str]:
     with open(os.path.join(REPOSITORY, ".github", "rulesets", "main.json"), encoding="utf-8") as handle:
         rules = json.load(handle)["rules"]
     contexts = [
@@ -300,15 +312,105 @@ def test_every_required_check_reports_in_a_merge_queue() -> None:
         for check in rule["parameters"]["required_status_checks"]
     ]
     assert contexts
+    return contexts
+
+
+def workflows() -> dict[str, list[str]]:
     folder = os.path.join(REPOSITORY, ".github", "workflows")
-    workflows = {}
-    for name in sorted(os.listdir(folder)):
-        with open(os.path.join(folder, name), encoding="utf-8") as handle:
-            workflows[name] = handle.read().splitlines()
+    return {name: workflow_lines(name) for name in sorted(os.listdir(folder)) if name.endswith((".yml", ".yaml"))}
+
+
+def workflow_jobs(lines: list[str]) -> list[dict[str, str]]:
+    """Read job-level names and uses with the workflow reader's indentation rules."""
+    jobs: list[dict[str, str]] = []
+    for line in lines[lines.index("jobs:") + 1 :]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if _indent(line) == 0:
+            break
+        if _indent(line) == 2 and line.rstrip().endswith(":"):
+            jobs.append({"name": line.strip()[:-1]})
+        elif _indent(line) == 4 and jobs:
+            key, _, value = line.strip().partition(":")
+            if key in {"name", "uses"}:
+                jobs[-1][key] = value.partition(" #")[0].strip().strip("\"'")
+    return jobs
+
+
+def reported_names(job: dict[str, str], context: str, callee_names: dict[str, list[str]]) -> list[str]:
+    if "uses" not in job:
+        return [job["name"]]
+    # Only callers that could supply this required context need a reviewed entry.
+    if not context.startswith(job["name"] + " / "):
+        return []
+    reference = job["uses"]
+    assert reference in callee_names, f"missing reviewed callee job names for {reference!r}"
+    return [job["name"] + " / " + name for name in callee_names[reference]]
+
+
+def assert_required_checks(
+    contexts: list[str], workflow_sources: dict[str, list[str]], callee_names: dict[str, list[str]]
+) -> None:
     for context in contexts:
-        found = [name for name, lines in workflows.items() if f"    name: {context}" in lines]
+        found = [
+            name
+            for name, lines in workflow_sources.items()
+            for job in workflow_jobs(lines)
+            for reported in reported_names(job, context, callee_names)
+            if reported == context
+        ]
         assert len(found) == 1, f"{len(found)} workflows run the required check {context!r}"
-        triggers = _on_block(workflows[found[0]])
+        triggers = _on_block(workflow_sources[found[0]])
         assert any(line.startswith("merge_group:") for line in triggers), (
             f"{found[0]} runs the required check {context!r} but not in a merge queue"
         )
+
+
+def test_every_required_check_reports_in_a_merge_queue() -> None:
+    assert_required_checks(required_checks(), workflows(), callee_job_names())
+
+
+def test_reusable_workflow_reports_the_composed_check_name() -> None:
+    assert_required_checks(["Licence / REUSE lint"], {"reuse.yml": workflow_lines("reuse.yml")}, callee_job_names())
+
+
+def test_literal_job_still_reports_its_check_name() -> None:
+    assert_required_checks(["Verification gate"], {"ci.yml": workflow_lines("ci.yml")}, {})
+
+
+def test_reusable_workflow_reports_each_callee_job() -> None:
+    names = {reference: ["First", "Second"] for reference in callee_job_names()}
+    assert_required_checks(["Licence / First", "Licence / Second"], {"reuse.yml": workflow_lines("reuse.yml")}, names)
+
+
+@pytest.mark.parametrize("context", ["No job reports this", "Licence / Not a callee job", "Licence"])
+def test_required_check_refuses_an_unreported_context(context: str) -> None:
+    with pytest.raises(AssertionError, match=f"0 workflows run the required check {context!r}"):
+        assert_required_checks([context], {"reuse.yml": workflow_lines("reuse.yml")}, callee_job_names())
+
+
+def test_required_check_refuses_an_unreviewed_reusable_pin() -> None:
+    reference = "plurano/horistes/.github/workflows/licence.yml@" + "f" * 40
+    lines = [f"    uses: {reference}" if line.startswith("    uses:") else line for line in workflow_lines("reuse.yml")]
+    with pytest.raises(AssertionError, match="missing reviewed callee job names") as caught:
+        assert_required_checks(["Licence / REUSE lint"], {"reuse.yml": lines}, callee_job_names())
+    assert reference in str(caught.value)
+
+
+def test_required_check_refuses_a_different_caller_name() -> None:
+    lines = [line.replace("name: Licence", "name: Other") for line in workflow_lines("reuse.yml")]
+    with pytest.raises(AssertionError, match="0 workflows run the required check 'Licence / REUSE lint'"):
+        assert_required_checks(["Licence / REUSE lint"], {"reuse.yml": lines}, callee_job_names())
+
+
+def test_required_check_refuses_duplicate_jobs_in_one_workflow() -> None:
+    lines = workflow_lines("reuse.yml")
+    lines += ["  duplicate:", "    name: Licence / REUSE lint", "    runs-on: ubuntu-latest"]
+    with pytest.raises(AssertionError, match="2 workflows run the required check 'Licence / REUSE lint'"):
+        assert_required_checks(["Licence / REUSE lint"], {"reuse.yml": lines}, callee_job_names())
+
+
+def test_required_check_refuses_a_workflow_without_merge_group() -> None:
+    lines = [line for line in workflow_lines("reuse.yml") if line.strip() != "merge_group:"]
+    with pytest.raises(AssertionError, match="but not in a merge queue"):
+        assert_required_checks(["Licence / REUSE lint"], {"reuse.yml": lines}, callee_job_names())
