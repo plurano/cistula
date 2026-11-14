@@ -14,6 +14,7 @@ path = [
     ".gitignore",
     "requirements/dev.txt",
     "requirements/semgrep.txt",
+    "tests/reusable_workflow_jobs.json",
     "renovate.json",
 ]
 precedence = "aggregate"
