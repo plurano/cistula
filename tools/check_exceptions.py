@@ -12,7 +12,7 @@ cannot stay.
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import os
 import subprocess
 import sys
@@ -70,14 +70,18 @@ def _path_problem(root: str, file: str) -> str | None:
     return None
 
 
-def _entry_problems(
-    root: str, entry: dict[str, object], today: datetime.date, lint: Callable[[str, str], bool]
-) -> list[str]:
+def _entry_problems(root: str, entry: dict[str, object], today: dt.date, lint: Callable[[str, str], bool]) -> list[str]:
     """Return what is wrong with one entry of the list."""
     if set(entry) != FIELDS:
         return [f"needs exactly the fields {sorted(FIELDS)}, found {sorted(entry)}"]
     file, rule, reason, expires = entry["file"], entry["rule"], entry["reason"], entry["expires"]
-    if not isinstance(file, str) or not isinstance(reason, str) or type(expires) is not datetime.date:
+    # A TOML datetime arrives as dt.datetime, a subclass of dt.date; the list takes a plain date only.
+    if (
+        not isinstance(file, str)
+        or not isinstance(reason, str)
+        or not isinstance(expires, dt.date)
+        or isinstance(expires, dt.datetime)
+    ):
         return ["file and reason must be text and expires a date"]
     found = []
     if rule != LINT_RULE:
@@ -96,7 +100,7 @@ def _entry_problems(
     return found
 
 
-def problems(root: str, today: datetime.date, lint: Callable[[str, str], bool] = passes_lint) -> list[str]:
+def problems(root: str, today: dt.date, lint: Callable[[str, str], bool] = passes_lint) -> list[str]:
     """Return every reason why the exception list of the repository at `root` does not hold on `today`."""
     with open(os.path.join(root, LIST), "rb") as stream:
         declared = tomllib.load(stream)
@@ -118,7 +122,7 @@ def problems(root: str, today: datetime.date, lint: Callable[[str, str], bool] =
 def main() -> int:
     """Check the repository this script lives in; exit status 1 when the list does not hold."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    found = problems(root, datetime.datetime.now(tz=datetime.UTC).date())
+    found = problems(root, dt.datetime.now(tz=dt.UTC).date())
     for text in found:
         sys.stderr.write(f"{LIST}: {text}\n")
     if found:
