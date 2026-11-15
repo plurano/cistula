@@ -75,7 +75,13 @@ def _entry_problems(root: str, entry: dict[str, object], today: dt.date, lint: C
     if set(entry) != FIELDS:
         return [f"needs exactly the fields {sorted(FIELDS)}, found {sorted(entry)}"]
     file, rule, reason, expires = entry["file"], entry["rule"], entry["reason"], entry["expires"]
-    if not isinstance(file, str) or not isinstance(reason, str) or type(expires) is not dt.date:
+    # A TOML datetime arrives as dt.datetime, a subclass of dt.date; the list takes a plain date only.
+    if (
+        not isinstance(file, str)
+        or not isinstance(reason, str)
+        or not isinstance(expires, dt.date)
+        or isinstance(expires, dt.datetime)
+    ):
         return ["file and reason must be text and expires a date"]
     found = []
     if rule != LINT_RULE:
