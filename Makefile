@@ -39,7 +39,7 @@ export SOURCE_DATE_EPOCH
 # from running side by side.
 .NOTPARALLEL:
 
-.PHONY: verify-all verify-engine-pin verify-codacy verify-hook-scripts verify fetch environment semgrep-environment verify-static verify-scanners package verify-package-size verify-durable-figures verify-reproducible verify-python lock clean
+.PHONY: verify-all verify-engine-pin verify-codacy verify-hook-scripts verify fetch environment semgrep-environment interpreter-gone verify-static verify-scanners package verify-package-size verify-durable-figures verify-reproducible verify-python lock clean
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. It runs this
@@ -106,14 +106,17 @@ verify-codacy:
 
 # This repository's own checks; they need no engine. `fetch` is the only step
 # that reaches the network (the package index, and ghcr.io for the trivy
-# database); everything after it runs offline.
+# database); everything after it runs offline. The stamps decide when the
+# Makefile is read whether a venv's interpreter resolves, so `fetch` builds
+# the first environments in this make, not only in a child, or a later
+# prerequisite would build them again.
 verify: fetch verify-static verify-codacy verify-scanners package verify-package-size verify-durable-figures verify-reproducible
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory verify-python PYTHON="$$python"; \
 	done
 	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Codacy exclusions, Python versions, semgrep and trivy scans, package, its size as the README states it, the durable-write figures the README states, same bytes from a second build, a consumer install by hash, and its tests on $(PYTHONS).'
 
-fetch:
+fetch: environment semgrep-environment
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory environment PYTHON="$$python"; \
 	done
@@ -123,8 +126,14 @@ fetch:
 # One environment per interpreter, holding exactly the packages of the lock:
 # pip refuses a package whose hash the lock does not name, and installs no
 # source distribution, so no build script of a tool runs here.
+#
+# A venv links to the interpreter it was made from; when that interpreter goes,
+# the link dangles under a fresh stamp, so the stamp is remade whenever the
+# link does not resolve.
+interpreter-gone:
 environment: $(ENV)/.locked
-$(ENV)/.locked: requirements/dev.txt
+$(ENV)/.locked: requirements/dev.txt $(if $(realpath $(ENV)/bin/python),,interpreter-gone)
+	@command -v '$(PYTHON)' >/dev/null 2>&1 || { printf '%s\n' "interpreter $(PYTHON) not found; PATH searched: $$PATH" >&2; exit 1; }
 	rm -rf '$(ENV)'
 	'$(PYTHON)' -m venv '$(ENV)'
 	'$(ENV)/bin/python' -m pip install --disable-pip-version-check --require-hashes \
@@ -133,7 +142,8 @@ $(ENV)/.locked: requirements/dev.txt
 
 # semgrep's environment, from its own lock in the same way.
 semgrep-environment: $(SEMGREP_ENV)/.locked
-$(SEMGREP_ENV)/.locked: requirements/semgrep.txt
+$(SEMGREP_ENV)/.locked: requirements/semgrep.txt $(if $(realpath $(SEMGREP_ENV)/bin/python),,interpreter-gone)
+	@command -v '$(PYTHON)' >/dev/null 2>&1 || { printf '%s\n' "interpreter $(PYTHON) not found; PATH searched: $$PATH" >&2; exit 1; }
 	rm -rf '$(SEMGREP_ENV)'
 	'$(PYTHON)' -m venv '$(SEMGREP_ENV)'
 	'$(SEMGREP_ENV)/bin/python' -m pip install --disable-pip-version-check --require-hashes \

@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import textwrap
 from typing import TYPE_CHECKING
 
@@ -379,6 +380,97 @@ def test_verify_hook_scripts_refuses_a_missing_engine_checkout(tmp_path: Path) -
     result = run_make(tmp_path, "verify-hook-scripts", f"PRAETOR_SRC={tmp_path / 'none'}")
     assert result.returncode != 0
     assert "PRAETOR_SRC names no engine checkout" in result.stderr
+
+
+def planted_environment(tmp_path: Path, directory: str, target_of_link: Path | str) -> Path:
+    """Create `tmp_path/work` with requirement locks and a newer `.venv/<directory>/.locked` stamp."""
+    work = tmp_path / "work"
+    requirements = work / "requirements"
+    requirements.mkdir(parents=True)
+    for name in ("dev.txt", "semgrep.txt"):
+        lock = requirements / name
+        lock.write_text("# lock\n", encoding="utf-8")
+        os.utime(lock, (1_000, 1_000))
+    environment = work / ".venv" / directory
+    (environment / "bin").mkdir(parents=True)
+    link = environment / "bin" / "python"
+    os.symlink(target_of_link, link)
+    stamp = environment / ".locked"
+    stamp.write_text("", encoding="utf-8")
+    os.utime(stamp, (2_000, 2_000))
+    return link
+
+
+@pytest.mark.parametrize(
+    ("target", "directory"),
+    [
+        ("environment", "cistula-absent-python"),
+        ("semgrep-environment", "semgrep"),
+    ],
+)
+def test_environment_with_a_dangling_interpreter_and_none_on_path_fails_by_name(
+    tmp_path: Path, target: str, directory: str
+) -> None:
+    interpreter = "cistula-absent-python"
+    link = planted_environment(tmp_path, directory, tmp_path / "gone" / "python3.99")
+    result = run_make(tmp_path, target, f"PYTHON={interpreter}", f"PYTHONS={interpreter}")
+    assert result.returncode != 0
+    assert f"interpreter {interpreter} not found" in result.stderr
+    assert ENV["PATH"] in result.stderr
+    assert os.path.islink(link)
+
+
+@pytest.mark.parametrize(
+    ("target", "directory"),
+    [
+        ("environment", os.path.basename(sys.executable)),
+        ("semgrep-environment", "semgrep"),
+    ],
+)
+def test_environment_with_a_dangling_interpreter_is_rebuilt(tmp_path: Path, target: str, directory: str) -> None:
+    planted_environment(tmp_path, directory, tmp_path / "gone" / "python3.99")
+    result = run_make(tmp_path, target, f"PYTHON={sys.executable}", f"PYTHONS={sys.executable}", "--dry-run")
+    assert result.returncode == 0, result.stderr
+    assert " -m venv " in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("target", "directory"),
+    [
+        ("environment", os.path.basename(sys.executable)),
+        ("semgrep-environment", "semgrep"),
+    ],
+)
+def test_environment_whose_interpreter_resolves_is_kept(tmp_path: Path, target: str, directory: str) -> None:
+    planted_environment(tmp_path, directory, sys.executable)
+    result = run_make(tmp_path, target, f"PYTHON={sys.executable}", f"PYTHONS={sys.executable}", "--dry-run")
+    assert result.returncode == 0, result.stderr
+    assert "-m venv" not in result.stdout
+
+
+def test_a_cold_fetch_builds_each_environment_once(tmp_path: Path) -> None:
+    requirements = tmp_path / "work" / "requirements"
+    requirements.mkdir(parents=True)
+    for name in ("dev.txt", "semgrep.txt"):
+        (requirements / name).write_text("# lock\n", encoding="utf-8")
+    stub = tmp_path / "bin" / "cistula-stub-python"
+    stub.parent.mkdir()
+    script = (
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        "if sys.argv[1:3] == ['-m', 'venv']:\n"
+        "    real = os.path.realpath(sys.argv[0])\n"
+        "    os.makedirs(os.path.join(sys.argv[3], 'bin'), exist_ok=True)\n"
+        "    os.symlink(real, os.path.join(sys.argv[3], 'bin', 'python'))\n"
+        "    with open(os.path.join(os.path.dirname(real), 'venv.log'), 'a', encoding='utf-8') as handle:\n"
+        "        handle.write(sys.argv[3] + '\\n')\n"
+    )
+    stub.write_text(script, encoding="utf-8")
+    stub.chmod(0o700)
+    result = run_make(tmp_path, "fetch", "environment", f"PYTHON={stub}", f"PYTHONS={stub}")
+    assert result.returncode == 0, result.stderr
+    log = (tmp_path / "bin" / "venv.log").read_text(encoding="utf-8").splitlines()
+    assert sorted(log) == [".venv/cistula-stub-python", ".venv/semgrep"]
 
 
 def _on_block(lines: list[str]) -> list[str]:
