@@ -79,6 +79,7 @@ def git(directory: Path, *arguments: str) -> str:
 
 
 def test_the_pages_hold_the_examples_this_file_runs() -> None:
+    """The pages contain the two expected Python examples in order."""
     # A new example fails here until a test below runs it.
     blocks = python_blocks()
 

@@ -563,7 +563,9 @@ def test_pages_head_refuses_an_empty_response(tmp_path: Path) -> None:
     result = pages_head(tmp_path, "a" * 40, "")
     assert result.returncode != 0
     assert "::error::Could not read the head of main" in result.stdout
-    assert not any(line.startswith("current=") for line in (tmp_path / "output").read_text(encoding="utf-8").splitlines())
+    assert not any(
+        line.startswith("current=") for line in (tmp_path / "output").read_text(encoding="utf-8").splitlines()
+    )
 
 
 def test_pages_head_refuses_a_sha_prefix(tmp_path: Path) -> None:
@@ -586,7 +588,9 @@ def test_pages_deploy_follows_and_requires_the_head_check() -> None:
     """The deploy job runs the head check before its guarded deploy step."""
     lines = workflow_lines("pages.yml")
     start = lines.index("  deploy:")
-    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("  ") and _indent(lines[i]) == 2), len(lines))
+    end = next(
+        (i for i in range(start + 1, len(lines)) if lines[i].startswith("  ") and _indent(lines[i]) == 2), len(lines)
+    )
     job = lines[start:end]
     head = job.index("      - name: Stop when main has moved on")
     deploy = job.index("      - name: Deploy")

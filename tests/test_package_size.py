@@ -77,6 +77,7 @@ def test_stated_refuses_anything_but_one_sentence(text: str, found: int) -> None
 
 
 def test_the_development_page_states_the_size_once() -> None:
+    """The development page states all four package size figures once."""
     with open(os.path.join(REPOSITORY, "docs", "development.md"), encoding="utf-8") as file:
         assert set(size.stated(file.read())) == set(size.KEYS)
 
@@ -121,6 +122,7 @@ def test_compare_allows_a_tenth_of_the_measured_size_and_no_more(figure: int, pr
 
 
 def test_compare_names_every_figure_that_is_off() -> None:
+    """The comparison names every figure outside the tolerance."""
     measured = dict.fromkeys(size.KEYS, 64499)
 
     problems = size.compare(dict.fromkeys(size.KEYS, 46000), measured)
@@ -129,6 +131,7 @@ def test_compare_names_every_figure_that_is_off() -> None:
 
 
 def test_main_passes_a_current_sentence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A current sentence passes against the measured package sizes."""
     dist = build(tmp_path / "dist")
     measured = size.measure(str(dist))
     page = tmp_path / "page.md"
@@ -142,6 +145,7 @@ def test_main_passes_a_current_sentence(tmp_path: Path, capsys: pytest.CaptureFi
 
 
 def test_main_fails_a_sentence_that_is_out_of_date(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """An out of date sentence reports the mismatched size."""
     dist = build(tmp_path / "dist")
     figures = rounded(size.measure(str(dist)))
     page = tmp_path / "page.md"
@@ -158,6 +162,7 @@ def test_main_fails_a_sentence_that_is_out_of_date(tmp_path: Path, capsys: pytes
 
 
 def test_main_fails_a_page_without_the_sentence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A page without the size sentence fails with a diagnostic."""
     dist = build(tmp_path / "dist")
     page = tmp_path / "page.md"
     page.write_text("No size here.\n", encoding="utf-8")
@@ -170,12 +175,14 @@ def test_main_fails_a_page_without_the_sentence(tmp_path: Path, capsys: pytest.C
 
 @pytest.mark.parametrize("argv", [[], ["page.md"], ["page.md", "dist", "more"]])
 def test_main_refuses_a_wrong_argument_count(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    """An incorrect argument count reports usage."""
     assert size.main(argv) == 2
     assert capsys.readouterr().err == "usage: check_package_size.py PAGE DIRECTORY\n"
 
 
 @pytest.mark.parametrize("damaged", ["pkg-1.tar.gz", "pkg-1-py3-none-any.whl"])
 def test_main_reports_a_damaged_build(tmp_path: Path, capsys: pytest.CaptureFixture[str], damaged: str) -> None:
+    """A damaged archive reports a measurement error."""
     dist = build(tmp_path / "dist")
     (dist / damaged).write_bytes((dist / damaged).read_bytes()[:100])
     page = tmp_path / "page.md"
@@ -186,6 +193,7 @@ def test_main_reports_a_damaged_build(tmp_path: Path, capsys: pytest.CaptureFixt
 
 
 def test_the_script_runs_as_the_gate_calls_it(tmp_path: Path) -> None:
+    """The script reports an out of date sentence when invoked in isolated mode."""
     dist = build(tmp_path / "dist")
     page = tmp_path / "page.md"
     page.write_text(sentence(dict.fromkeys(size.KEYS, 999000)), encoding="utf-8")

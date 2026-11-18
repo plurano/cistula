@@ -44,6 +44,7 @@ def test_stated_reads_every_row_with_its_spans_in_microseconds() -> None:
 
 
 def test_the_guarantees_page_states_one_table() -> None:
+    """The guarantees page contains the expected figures and a matching tmpfs measurement."""
     with open(os.path.join(REPOSITORY, "docs", "guarantees.md"), encoding="utf-8") as file:
         rows = figures.stated(file.read())
 
@@ -143,6 +144,7 @@ def test_compare_holds_every_disk_row_to_the_ratio(row: str, problem: str | None
 
 
 def test_main_passes_a_current_table(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A current table passes against the measurement."""
     page = tmp_path / "page.md"
     page.write_text(TABLE, encoding="utf-8")
     measured = tmp_path / "durable.tsv"
@@ -158,6 +160,7 @@ def test_main_passes_a_current_table(tmp_path: Path, capsys: pytest.CaptureFixtu
 
 
 def test_main_fails_a_table_that_is_out_of_date(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """An out of date table fails against the measurement."""
     page = tmp_path / "page.md"
     page.write_text(TABLE, encoding="utf-8")
     measured = tmp_path / "durable.tsv"
@@ -171,6 +174,7 @@ def test_main_fails_a_table_that_is_out_of_date(tmp_path: Path, capsys: pytest.C
 
 
 def test_main_fails_a_page_without_the_table(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A page without the table fails with a diagnostic."""
     page = tmp_path / "page.md"
     page.write_text("No table.\n", encoding="utf-8")
     measured = tmp_path / "durable.tsv"
@@ -182,16 +186,19 @@ def test_main_fails_a_page_without_the_table(tmp_path: Path, capsys: pytest.Capt
 
 @pytest.mark.parametrize("argv", [[], ["page.md"], ["page.md", "durable.tsv", "more"]])
 def test_main_refuses_a_wrong_argument_count(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    """An incorrect argument count reports usage."""
     assert figures.main(argv) == 2
     assert capsys.readouterr().err == "usage: check_durable_figures.py PAGE MEASUREMENT\n"
 
 
 def test_main_reports_a_missing_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A missing input file reports a usage error."""
     assert figures.main([str(tmp_path / "page.md"), str(tmp_path / "durable.tsv")]) == 2
     assert capsys.readouterr().err.startswith("usage: check_durable_figures.py PAGE MEASUREMENT: ")
 
 
 def test_the_script_runs_as_the_gate_calls_it(tmp_path: Path) -> None:
+    """The script reports mismatched figures when invoked in isolated mode."""
     page = tmp_path / "page.md"
     page.write_text(TABLE, encoding="utf-8")
     measured = tmp_path / "durable.tsv"
