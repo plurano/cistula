@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import textwrap
@@ -54,10 +55,14 @@ def _indent(line: str) -> int:
     return len(line) - len(line.lstrip())
 
 
+def workflow_lines(workflow: str) -> list[str]:
+    with open(os.path.join(REPOSITORY, ".github", "workflows", workflow), encoding="utf-8") as handle:
+        return handle.read().splitlines()
+
+
 def run_block(workflow: str, step: str) -> str:
     """Return the `run: |` text of the one step named `step` in `.github/workflows/<workflow>`."""
-    with open(os.path.join(REPOSITORY, ".github", "workflows", workflow), encoding="utf-8") as handle:
-        lines = handle.read().splitlines()
+    lines = workflow_lines(workflow)
     starts = [number for number, line in enumerate(lines) if line.strip() == f"- name: {step}"]
     assert len(starts) == 1, f"{workflow} names the step {step!r} {len(starts)} times"
     rest = lines[starts[0] + 1 :]
@@ -248,15 +253,12 @@ def test_engine_pin_refuses_another_commit(tmp_path: Path, reference: str) -> No
     assert engine_pin(tmp_path, reference).returncode == 1
 
 
-def verify_engine_pin(tmp_path: Path, workflow: str | None) -> subprocess.CompletedProcess[str]:
+def run_make(tmp_path: Path, target: str, *variables: str) -> subprocess.CompletedProcess[str]:
+    """Run `target` of a copy of the Makefile in `tmp_path/work`, which the caller has filled."""
     copy = tmp_path / "work"
-    copy.mkdir()
     shutil.copyfile(os.path.join(REPOSITORY, "Makefile"), copy / "Makefile")
-    if workflow is not None:
-        (copy / ".github" / "workflows").mkdir(parents=True)
-        (copy / ".github" / "workflows" / "ci.yml").write_text(workflow, encoding="utf-8")
     return subprocess.run(
-        [str(PROGRAMS["make"]), "-s", "-f", "Makefile", "verify-engine-pin"],
+        [str(PROGRAMS["make"]), "-s", "-f", "Makefile", target, *variables],
         cwd=copy,
         env={**ENV, "HOME": str(tmp_path)},
         capture_output=True,
@@ -264,6 +266,15 @@ def verify_engine_pin(tmp_path: Path, workflow: str | None) -> subprocess.Comple
         timeout=60,
         check=False,
     )
+
+
+def verify_engine_pin(tmp_path: Path, workflow: str | None) -> subprocess.CompletedProcess[str]:
+    copy = tmp_path / "work"
+    copy.mkdir()
+    if workflow is not None:
+        (copy / ".github" / "workflows").mkdir(parents=True)
+        (copy / ".github" / "workflows" / "ci.yml").write_text(workflow, encoding="utf-8")
+    return run_make(tmp_path, "verify-engine-pin")
 
 
 def test_verify_engine_pin_admits_a_workflow_that_pins_the_engine(tmp_path: Path) -> None:
@@ -275,6 +286,99 @@ def test_verify_engine_pin_refuses_a_missing_pin(tmp_path: Path, workflow: str |
     result = verify_engine_pin(tmp_path, workflow)
     assert result.returncode != 0
     assert "no workflow declares PRAETOR_REF" in result.stderr
+
+
+HOOK_SCRIPTS = ("checkpoint.py", "common.py")
+CODACY_HELD = '# Entered 2026-11-18, MEL C, ends 2026-11-28.\nexclude_paths:\n  - "AGENTS.md"\n  - ".codex/rules.md"\n'
+
+
+def verify_codacy(tmp_path: Path, text: str | None, today: str) -> subprocess.CompletedProcess[str]:
+    copy = tmp_path / "work"
+    copy.mkdir()
+    if text is not None:
+        (copy / ".codacy.yml").write_text(text, encoding="utf-8")
+    return run_make(tmp_path, "verify-codacy", f"CODACY_TODAY={today}")
+
+
+def test_verify_codacy_admits_the_committed_file_on_its_last_day(tmp_path: Path) -> None:
+    with open(os.path.join(REPOSITORY, ".codacy.yml"), encoding="utf-8") as handle:
+        committed = handle.read()
+    ends = re.findall(r"MEL C, ends (\d{4}-\d{2}-\d{2})", committed)
+    assert len(ends) == 1, f".codacy.yml names {len(ends)} end dates"
+    result = verify_codacy(tmp_path, committed, ends[0])
+    assert result.returncode == 0, result.stderr
+
+
+def test_verify_codacy_admits_a_tree_without_the_file(tmp_path: Path) -> None:
+    assert verify_codacy(tmp_path, None, "2026-11-18").returncode == 0
+
+
+def test_verify_codacy_refuses_the_day_after_the_end(tmp_path: Path) -> None:
+    result = verify_codacy(tmp_path, CODACY_HELD, "2026-11-29")
+    assert result.returncode != 0
+    assert "ended on 2026-11-28" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("line", "message"),
+    [
+        ('  - "src/cistula/process.py"\n', "excludes src/cistula/process.py, which no check"),
+        ('  - "tools/**"\n', "excludes tools/**, which no check"),
+        ("engines: {}\n", "a line other than a comment"),
+    ],
+)
+def test_verify_codacy_refuses_an_exclusion_it_does_not_hold(tmp_path: Path, line: str, message: str) -> None:
+    result = verify_codacy(tmp_path, CODACY_HELD + line, "2026-11-18")
+    assert result.returncode != 0
+    assert message in result.stderr
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        CODACY_HELD.replace("MEL C, ends 2026-11-28", "MEL C"),
+        CODACY_HELD + "# MEL C, ends 2026-11-30\n",
+    ],
+)
+def test_verify_codacy_refuses_a_file_without_one_end_date(tmp_path: Path, text: str) -> None:
+    result = verify_codacy(tmp_path, text, "2026-11-18")
+    assert result.returncode != 0
+    assert "names no single end date" in result.stderr
+
+
+@pytest.fixture
+def engine_scripts(tmp_path: Path) -> Path:
+    """Copy the committed hook scripts into `tmp_path/work` and into an engine checkout; return the checkout."""
+    for root in (tmp_path / "work", tmp_path / "engine"):
+        scripts = root / ".config" / "lefthook" / "scripts"
+        scripts.mkdir(parents=True)
+        for name in HOOK_SCRIPTS:
+            shutil.copyfile(os.path.join(REPOSITORY, ".config", "lefthook", "scripts", name), scripts / name)
+    return tmp_path / "engine"
+
+
+def test_verify_hook_scripts_admits_the_scripts_of_the_engine(tmp_path: Path, engine_scripts: Path) -> None:
+    result = run_make(tmp_path, "verify-hook-scripts", f"PRAETOR_SRC={engine_scripts}")
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("name", HOOK_SCRIPTS)
+def test_verify_hook_scripts_refuses_a_script_that_differs(tmp_path: Path, engine_scripts: Path, name: str) -> None:
+    with open(engine_scripts / ".config" / "lefthook" / "scripts" / name, "a", encoding="utf-8") as handle:
+        handle.write("# planted\n")
+    assert run_make(tmp_path, "verify-hook-scripts", f"PRAETOR_SRC={engine_scripts}").returncode != 0
+
+
+def test_verify_hook_scripts_refuses_a_script_the_engine_lacks(tmp_path: Path, engine_scripts: Path) -> None:
+    (engine_scripts / ".config" / "lefthook" / "scripts" / "common.py").unlink()
+    assert run_make(tmp_path, "verify-hook-scripts", f"PRAETOR_SRC={engine_scripts}").returncode != 0
+
+
+@pytest.mark.usefixtures("engine_scripts")
+def test_verify_hook_scripts_refuses_a_missing_engine_checkout(tmp_path: Path) -> None:
+    result = run_make(tmp_path, "verify-hook-scripts", f"PRAETOR_SRC={tmp_path / 'none'}")
+    assert result.returncode != 0
+    assert "PRAETOR_SRC names no engine checkout" in result.stderr
 
 
 def _on_block(lines: list[str]) -> list[str]:
@@ -290,7 +394,15 @@ def _on_block(lines: list[str]) -> list[str]:
     return block
 
 
-def test_every_required_check_reports_in_a_merge_queue() -> None:
+def callee_job_names() -> dict[str, list[str]]:
+    # Reviewed names for default inputs, keyed by the entire pinned reference.
+    # A pin bump requires reviewing the callee again, never a network fetch here.
+    with open(os.path.join(REPOSITORY, "tests", "reusable_workflow_jobs.json"), encoding="utf-8") as handle:
+        names: dict[str, list[str]] = json.load(handle)
+    return names
+
+
+def required_checks() -> list[str]:
     with open(os.path.join(REPOSITORY, ".github", "rulesets", "main.json"), encoding="utf-8") as handle:
         rules = json.load(handle)["rules"]
     contexts = [
@@ -300,15 +412,105 @@ def test_every_required_check_reports_in_a_merge_queue() -> None:
         for check in rule["parameters"]["required_status_checks"]
     ]
     assert contexts
+    return contexts
+
+
+def workflows() -> dict[str, list[str]]:
     folder = os.path.join(REPOSITORY, ".github", "workflows")
-    workflows = {}
-    for name in sorted(os.listdir(folder)):
-        with open(os.path.join(folder, name), encoding="utf-8") as handle:
-            workflows[name] = handle.read().splitlines()
+    return {name: workflow_lines(name) for name in sorted(os.listdir(folder)) if name.endswith((".yml", ".yaml"))}
+
+
+def workflow_jobs(lines: list[str]) -> list[dict[str, str]]:
+    """Read job-level names and uses with the workflow reader's indentation rules."""
+    jobs: list[dict[str, str]] = []
+    for line in lines[lines.index("jobs:") + 1 :]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if _indent(line) == 0:
+            break
+        if _indent(line) == 2 and line.rstrip().endswith(":"):
+            jobs.append({"name": line.strip()[:-1]})
+        elif _indent(line) == 4 and jobs:
+            key, _, value = line.strip().partition(":")
+            if key in {"name", "uses"}:
+                jobs[-1][key] = value.partition(" #")[0].strip().strip("\"'")
+    return jobs
+
+
+def reported_names(job: dict[str, str], context: str, callee_names: dict[str, list[str]]) -> list[str]:
+    if "uses" not in job:
+        return [job["name"]]
+    # Only callers that could supply this required context need a reviewed entry.
+    if not context.startswith(job["name"] + " / "):
+        return []
+    reference = job["uses"]
+    assert reference in callee_names, f"missing reviewed callee job names for {reference!r}"
+    return [job["name"] + " / " + name for name in callee_names[reference]]
+
+
+def assert_required_checks(
+    contexts: list[str], workflow_sources: dict[str, list[str]], callee_names: dict[str, list[str]]
+) -> None:
     for context in contexts:
-        found = [name for name, lines in workflows.items() if f"    name: {context}" in lines]
+        found = [
+            name
+            for name, lines in workflow_sources.items()
+            for job in workflow_jobs(lines)
+            for reported in reported_names(job, context, callee_names)
+            if reported == context
+        ]
         assert len(found) == 1, f"{len(found)} workflows run the required check {context!r}"
-        triggers = _on_block(workflows[found[0]])
+        triggers = _on_block(workflow_sources[found[0]])
         assert any(line.startswith("merge_group:") for line in triggers), (
             f"{found[0]} runs the required check {context!r} but not in a merge queue"
         )
+
+
+def test_every_required_check_reports_in_a_merge_queue() -> None:
+    assert_required_checks(required_checks(), workflows(), callee_job_names())
+
+
+def test_reusable_workflow_reports_the_composed_check_name() -> None:
+    assert_required_checks(["Licence / REUSE lint"], {"reuse.yml": workflow_lines("reuse.yml")}, callee_job_names())
+
+
+def test_literal_job_still_reports_its_check_name() -> None:
+    assert_required_checks(["Verification gate"], {"ci.yml": workflow_lines("ci.yml")}, {})
+
+
+def test_reusable_workflow_reports_each_callee_job() -> None:
+    names = {reference: ["First", "Second"] for reference in callee_job_names()}
+    assert_required_checks(["Licence / First", "Licence / Second"], {"reuse.yml": workflow_lines("reuse.yml")}, names)
+
+
+@pytest.mark.parametrize("context", ["No job reports this", "Licence / Not a callee job", "Licence"])
+def test_required_check_refuses_an_unreported_context(context: str) -> None:
+    with pytest.raises(AssertionError, match=f"0 workflows run the required check {context!r}"):
+        assert_required_checks([context], {"reuse.yml": workflow_lines("reuse.yml")}, callee_job_names())
+
+
+def test_required_check_refuses_an_unreviewed_reusable_pin() -> None:
+    reference = "plurano/horistes/.github/workflows/licence.yml@" + "f" * 40
+    lines = [f"    uses: {reference}" if line.startswith("    uses:") else line for line in workflow_lines("reuse.yml")]
+    with pytest.raises(AssertionError, match="missing reviewed callee job names") as caught:
+        assert_required_checks(["Licence / REUSE lint"], {"reuse.yml": lines}, callee_job_names())
+    assert reference in str(caught.value)
+
+
+def test_required_check_refuses_a_different_caller_name() -> None:
+    lines = [line.replace("name: Licence", "name: Other") for line in workflow_lines("reuse.yml")]
+    with pytest.raises(AssertionError, match="0 workflows run the required check 'Licence / REUSE lint'"):
+        assert_required_checks(["Licence / REUSE lint"], {"reuse.yml": lines}, callee_job_names())
+
+
+def test_required_check_refuses_duplicate_jobs_in_one_workflow() -> None:
+    lines = workflow_lines("reuse.yml")
+    lines += ["  duplicate:", "    name: Licence / REUSE lint", "    runs-on: ubuntu-latest"]
+    with pytest.raises(AssertionError, match="2 workflows run the required check 'Licence / REUSE lint'"):
+        assert_required_checks(["Licence / REUSE lint"], {"reuse.yml": lines}, callee_job_names())
+
+
+def test_required_check_refuses_a_workflow_without_merge_group() -> None:
+    lines = [line for line in workflow_lines("reuse.yml") if line.strip() != "merge_group:"]
+    with pytest.raises(AssertionError, match="but not in a merge queue"):
+        assert_required_checks(["Licence / REUSE lint"], {"reuse.yml": lines}, callee_job_names())

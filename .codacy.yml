@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# Codacy reads this file in place of the ignored-file settings of its UI, and
+# a pull request that changes it is analysed with the changed file. Reference:
+# https://docs.codacy.com/repositories-configure/codacy-configuration-file/
+# Patterns use Java glob syntax. `make verify-codacy` admits only comments,
+# exclude_paths and items that name a file of CODACY_EXCLUDABLE in the Makefile.
+#
+# Declared exception: entered 2026-11-18, MEL C, ends 2026-11-28. The gate
+# fails from the day after; drop each line once the engine ships its file
+# reworked, or renew the date with a new reason.
+exclude_paths:
+  # The standards engine writes these four files: adoption renders every
+  # block of AGENTS.md, and `praetorctl compile-context --verify`, which
+  # `make verify-all` runs, holds the other three equal to it. Codacy's
+  # Agentlinter escape-hatch-missing findings on them flag the absolute rules
+  # of the governance block, which carry no escape hatch by design: false
+  # positives of the engine's renderer.
+  - "AGENTS.md"
+  - "CLAUDE.md"
+  - ".gemini/GEMINI.md"
+  - ".codex/rules.md"
+  # The engine's hook script. `make verify-hook-scripts`, which CI runs, holds
+  # it byte-equal to the engine commit ci.yml pins. Codacy's Lizard file-length
+  # finding on it is true and the engine's to fix.
+  - ".config/lefthook/scripts/common.py"
