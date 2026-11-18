@@ -5,8 +5,10 @@
 The readers decode UTF-8, read one document or JSON Lines (one document per
 line), and refuse two things the standard library accepts
 silently: an object that names the same key twice (it keeps the last value)
-and a number JSON does not have (NaN, an infinity, a number too large for a
-float).
+and a non-finite float (NaN, an infinity, or a floating-point literal that
+overflows a float; an integer is read as `int` up to the interpreter's limit
+on integer-string conversion, `sys.get_int_max_str_digits()`, 4300 digits
+unless changed, and a longer integer raises `ValueError`).
 
 The writers put the new content into a temporary file beside the target, flush
 it to disk and rename it over the target in one step: after a failure or a
@@ -112,12 +114,18 @@ def loads_json(text: str, *, unique_keys: bool = True, finite_numbers: bool = Tr
     `unique_keys=False` restores the standard library's behaviour of keeping
     the last value.
 
-    `NaN`, `Infinity` and `-Infinity`, which JSON does not have, and a number
-    too large for a float raise `ValueError`. `finite_numbers=False` restores
-    the standard library's behaviour: the three names are read as these
-    numbers and a number too large is read as an infinity. `write_json`
-    refuses to write any of them, so only a document read with the default can
-    always be written back.
+    `NaN`, `Infinity` and `-Infinity`, which JSON does not have, and a
+    floating-point literal (with a fraction or an exponent) that overflows a
+    float raise `ValueError`; an integer is read as `int` up to the
+    interpreter's limit on integer-string conversion
+    (`sys.get_int_max_str_digits()`, 4300 digits unless changed), and a longer
+    integer raises `ValueError`. `finite_numbers=False` restores the standard
+    library's behaviour: the three names are read as these floats and an
+    overflowing float literal is read as an infinity. `write_json` writes
+    integers up to that limit (a longer `int` raises `ValueError` and leaves
+    the old file whole) and refuses non-finite floats (`nan`, `inf` and
+    `-inf`), so only a document read with the default can always be written
+    back.
 
     Each keyword lifts its one check and nothing else. Everything else is
     `json.loads`: malformed text raises `json.JSONDecodeError`. All of these
@@ -141,8 +149,11 @@ def read_json(path: _Path, *, unique_keys: bool = True, finite_numbers: bool = T
     """Read a UTF-8 JSON file strictly; see `loads_json` for the two keywords.
 
     An object with a repeated key raises `DuplicateKeyError`; NaN, an
-    infinity and a number too large for a float raise `ValueError`. Bytes that
-    are not UTF-8 raise `UnicodeDecodeError`, malformed JSON (including a
+    infinity and a floating-point literal that overflows a float raise
+    `ValueError` (an integer is read as `int` up to the interpreter's limit
+    on integer-string conversion, `sys.get_int_max_str_digits()`, 4300 digits
+    unless changed, and a longer integer raises `ValueError`). Bytes that are
+    not UTF-8 raise `UnicodeDecodeError`, malformed JSON (including a
     byte-order mark) raises `json.JSONDecodeError`. All of these are
     `ValueError`. A missing or unreadable file raises `OSError`.
     """
@@ -425,8 +436,9 @@ def write_json(  # noqa: PLR0913 - one keyword per independent setting of the wr
     The document ends with a newline. Non-ASCII text is written as itself;
     `ensure_ascii=True` writes each non-ASCII character as a Unicode escape,
     as the standard serialiser does. A value JSON cannot represent is refused
-    before anything is written: NaN and the two infinities raise `ValueError`,
-    a value of a type JSON does not have raises `TypeError`. See
+    before anything is written: NaN, the two infinities and an `int` longer
+    than the interpreter's limit on integer-string conversion raise
+    `ValueError`, a value of a type JSON does not have raises `TypeError`. See
     `write_bytes_atomic` for what "in one step" guarantees, for the
     permissions of the file and for `durable` and `parents`.
     """
@@ -448,9 +460,9 @@ def write_json_lines(  # noqa: PLR0913 - one keyword per independent setting of 
     Each value becomes one compact document on its own line, and every line
     ends with a newline; no values give an empty file. `sort_keys` and
     `ensure_ascii` work as for `write_json`. Every value is serialised before
-    the file is opened, so a value JSON cannot represent (NaN and the two
-    infinities raise `ValueError`, any other type raises `TypeError`) leaves
-    `path` as it was. `values` is a sequence or another iterable of values,
+    the file is opened, so a value JSON cannot represent (NaN, the two
+    infinities and an `int` past the conversion limit raise `ValueError`, any
+    other type raises `TypeError`) leaves `path` as it was. `values` is a sequence or another iterable of values,
     never one text, bytes or object, which raise `TypeError`. Appending is not
     offered: an append cannot be made in one step. See `write_bytes_atomic`
     for what "in one step" guarantees and for `durable` and `parents`.

@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
 # SPDX-License-Identifier: EUPL-1.2
-"""Fail when the package size the README states is out of date.
+"""Fail when the package size a documentation page states is out of date.
 
-Usage: check_package_size.py README DIRECTORY
+Usage: check_package_size.py PAGE DIRECTORY
 
-The README states the size of the two built files in one sentence of the form
+PAGE (docs/development.md) states the size of the two built files in one sentence of the form
 "about 277 kB and 64 kB instead of 57 kB and 24 kB": the source distribution
 and the wheel as built, with their members stored uncompressed, and the size
 each would have compressed. DIRECTORY holds one build. Each figure may be off
@@ -33,7 +33,7 @@ SENTENCE = re.compile(
 )
 KEYS = ("source distribution", "wheel", "source distribution compressed", "wheel compressed")
 KB = 1000
-USAGE = "usage: check_package_size.py README DIRECTORY"
+USAGE = "usage: check_package_size.py PAGE DIRECTORY"
 
 
 def stated(text: str) -> dict[str, int]:
@@ -86,19 +86,19 @@ def _kb(size: int) -> int:
 def compare(stated: dict[str, int], measured: dict[str, int]) -> list[str]:
     """Return one line per figure that is off by more than a tenth of the measured size."""
     return [
-        f"{key}: README states {stated[key] // KB} kB, measured {measured[key]} bytes ({_kb(measured[key])} kB)"
+        f"{key}: the page states {stated[key] // KB} kB, measured {measured[key]} bytes ({_kb(measured[key])} kB)"
         for key in KEYS
         if abs(stated[key] - measured[key]) * 10 > measured[key]
     ]
 
 
 def main(arguments: list[str]) -> int:
-    """Check the README and the build directory named on the command line."""
-    if len(arguments) != 2:  # noqa: PLR2004 - the README and the build
+    """Check the page and the build directory named on the command line."""
+    if len(arguments) != 2:  # noqa: PLR2004 - the page and the build
         sys.stderr.write(f"{USAGE}\n")
         return 2
-    readme, directory = arguments
-    with open(readme, encoding="utf-8") as file:
+    page, directory = arguments
+    with open(page, encoding="utf-8") as file:
         text = file.read()
     try:
         figures = stated(text)
@@ -111,12 +111,12 @@ def main(arguments: list[str]) -> int:
         return 2
     problems = compare(figures, sizes)
     if problems:
-        sys.stderr.write(f"FAIL: the package size in {readme} is out of date:\n")
+        sys.stderr.write(f"FAIL: the package size in {page} is out of date:\n")
         sys.stderr.write("".join(f"  {problem}\n" for problem in problems))
         sys.stderr.write("Update the sentence to the measured sizes.\n")
         return 1
-    sys.stdout.write("".join(f"{key}: {sizes[key]} bytes, README {figures[key] // KB} kB\n" for key in KEYS))
-    sys.stdout.write(f"PASS: the package size in {readme} is within a tenth of the measured size.\n")
+    sys.stdout.write("".join(f"{key}: {sizes[key]} bytes, page {figures[key] // KB} kB\n" for key in KEYS))
+    sys.stdout.write(f"PASS: the package size in {page} is within a tenth of the measured size.\n")
     return 0
 
 

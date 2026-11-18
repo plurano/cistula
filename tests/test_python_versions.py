@@ -24,6 +24,8 @@ FILES = [
     check.LINT_CONFIG,
     check.MAKEFILE,
     check.LOCK,
+    check.DOCS_LOCK,
+    check.PAGES_WORKFLOW,
     check.WORKFLOW,
     check.RELEASE_WORKFLOW,
 ]
@@ -40,7 +42,7 @@ WORKFLOW_LIST = (
 
 @pytest.fixture
 def copy(tmp_path: Path) -> str:
-    """Return a directory that holds this repository's own six files."""
+    """Return a directory that holds this repository's own eight files."""
     for file in FILES:
         target = tmp_path / file
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -64,6 +66,30 @@ def test_this_repository_names_the_same_versions_everywhere() -> None:
 
 def test_copy_of_this_repository_passes(copy: str) -> None:
     assert check.problems(copy) == []
+
+
+def test_a_new_pages_interpreter_names_both_docs_lock_places(copy: str) -> None:
+    """A Pages interpreter change identifies both documentation locks."""
+    change(copy, check.PAGES_WORKFLOW, 'python-version: "3.14"', 'python-version: "3.13"')
+
+    assert [text.split(":")[0] for text in check.problems(copy)] == [check.MAKEFILE, check.DOCS_LOCK]
+
+
+def test_a_pages_workflow_without_an_interpreter_fails(copy: str) -> None:
+    """A Pages workflow that sets up no Python interpreter is refused."""
+    change(copy, check.PAGES_WORKFLOW, '          python-version: "3.14"\n', "")
+    change(copy, check.MAKEFILE, " --python-version=3.14", "")
+    change(copy, check.DOCS_LOCK, " --python-version=3.14", "")
+
+    assert [text.split(":")[0] for text in check.problems(copy)] == [check.PAGES_WORKFLOW]
+
+
+def test_a_pages_workflow_with_two_interpreters_fails(copy: str) -> None:
+    """A Pages workflow that sets up more than one Python interpreter is refused."""
+    line = '          python-version: "3.14"\n'
+    change(copy, check.PAGES_WORKFLOW, line, line + line)
+
+    assert check.problems(copy)[0].split(":")[0] == check.PAGES_WORKFLOW
 
 
 @pytest.mark.parametrize(
@@ -90,6 +116,21 @@ def test_copy_of_this_repository_passes(copy: str) -> None:
         (check.MAKEFILE, GATE, "INTERPRETERS ?= python3.11", "Makefile: PYTHONS"),
         (check.MAKEFILE, "--python-version=3.11", "--python-version=3.12", "Makefile: --python-version of the lock"),
         (check.MAKEFILE, " --python-version=3.11", "", "Makefile: --python-version of the lock"),
+        (
+            check.MAKEFILE,
+            "--python-version=3.14",
+            "--python-version=3.13",
+            "Makefile: --python-version of the docs lock",
+        ),
+        (
+            check.MAKEFILE,
+            "--python-version=3.14",
+            "--python-version=3.11",
+            "Makefile: --python-version of the docs lock",
+        ),
+        (check.MAKEFILE, " --python-version=3.14", "", "Makefile: --python-version of the docs lock"),
+        (check.DOCS_LOCK, "--python-version=3.14", "--python-version=3.13", "requirements/docs.txt: --python-version"),
+        (check.DOCS_LOCK, " --python-version=3.14", "", "requirements/docs.txt: --python-version"),
         (check.LOCK, "--python-version=3.11", "--python-version=3.12", "requirements/dev.txt: --python-version"),
         (check.LOCK, " --python-version=3.11", "", "requirements/dev.txt: --python-version"),
         (check.WORKFLOW, "            3.11\n            3.12\n", "            3.12\n", "ci.yml: python-version"),
@@ -148,7 +189,7 @@ def test_a_floor_that_moves_in_the_classifiers_only_names_every_other_place(copy
 
     found = check.problems(copy)
 
-    assert len(found) == len(check.places(copy)) - 1
+    assert len(found) == len(check.places(copy)) - 4
     assert not any("classifiers" in text for text in found)
 
 
@@ -180,7 +221,7 @@ def test_no_classifier_names_a_version(copy: str, old: str, new: str) -> None:
 
     assert check.supported(copy) == []
     assert found[0].startswith("pyproject.toml: classifiers: names None")
-    assert len(found) == len(check.places(copy))
+    assert len(found) == len(check.places(copy)) - 3
 
 
 @pytest.mark.parametrize("file", [check.WORKFLOW, check.RELEASE_WORKFLOW])
@@ -202,9 +243,9 @@ def test_script_passes_on_a_copy_and_names_the_versions(copy: str) -> None:
     done = run_script(copy)
 
     assert (done.returncode, done.stderr) == (0, "")
-    assert (
-        done.stdout
-        == "PASS: metadata, lint, type check, lock, gate and CI all name Python 3.11, 3.12, 3.13, 3.14, 3.15.\n"
+    assert done.stdout == (
+        "PASS: metadata, lint, type check, package lock, gate and CI all name Python 3.11, 3.12, 3.13, 3.14, 3.15;"
+        " the documentation lock names the Pages interpreter 3.14.\n"
     )
 
 

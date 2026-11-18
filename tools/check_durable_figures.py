@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
 # SPDX-License-Identifier: EUPL-1.2
-"""Fail when the durable-write figures the README states disagree with a measurement.
+"""Fail when the durable-write figures a documentation page states disagree with a measurement.
 
-Usage: check_durable_figures.py README MEASUREMENT
+Usage: check_durable_figures.py PAGE MEASUREMENT
 
-README holds one table under "Durable by default" with a row per file system:
+PAGE (docs/guarantees.md) holds one table under "Durable by default" with a row per file system:
 its name, what a default (durable) write of one small file costs, and what one
 with `durable=False` costs, each as "N ms", "N µs" or "N to M µs", optionally
 with earlier runs in parentheses. MEASUREMENT is the output of
@@ -31,7 +31,7 @@ from __future__ import annotations
 import re
 import sys
 
-USAGE = "usage: check_durable_figures.py README MEASUREMENT"
+USAGE = "usage: check_durable_figures.py PAGE MEASUREMENT"
 # How many times a write without the flushes a disk row of the table states the default at least.
 RATIO = 20
 # How many times a write without the flushes a measured default costs at least on a disk.
@@ -112,7 +112,7 @@ def compare(rows: dict[str, tuple[Span, Span]], kind: str, durable: float, plain
     row = rows.get(kind)
     if row is not None:
         problems.extend(
-            f"{kind}: measured {value:g} µs for {way}, the README states {_show(figures)}"
+            f"{kind}: measured {value:g} µs for {way}, the page states {_show(figures)}"
             for way, value, figures in (("the default", durable, row[0]), ("durable=False", plain, row[1]))
             if not _within(value, figures)
         )
@@ -125,13 +125,13 @@ def compare(rows: dict[str, tuple[Span, Span]], kind: str, durable: float, plain
 
 
 def main(arguments: list[str]) -> int:
-    """Check the README against the measurement named on the command line."""
-    if len(arguments) != 2:  # noqa: PLR2004 - the README and the measurement
+    """Check the page against the measurement named on the command line."""
+    if len(arguments) != 2:  # noqa: PLR2004 - the page and the measurement
         sys.stderr.write(f"{USAGE}\n")
         return 2
-    readme, measurement = arguments
+    page, measurement = arguments
     try:
-        with open(readme, encoding="utf-8") as file:
+        with open(page, encoding="utf-8") as file:
             rows = stated(file.read())
         with open(measurement, encoding="utf-8") as file:
             kind, durable, plain = measured(file.read())
@@ -143,12 +143,12 @@ def main(arguments: list[str]) -> int:
         return 1
     problems = compare(rows, kind, durable, plain)
     if problems:
-        sys.stderr.write(f"FAIL: the durable-write figures in {readme} disagree with the measurement:\n")
+        sys.stderr.write(f"FAIL: the durable-write figures in {page} disagree with the measurement:\n")
         sys.stderr.write("".join(f"  {problem}\n" for problem in problems))
         return 1
     row = "its row" if kind in rows else "no row of the table"
     sys.stdout.write(f"{kind}: default {durable:g} µs, durable=False {plain:g} µs; {row}\n")
-    sys.stdout.write(f"PASS: the durable-write figures in {readme} agree with the measurement.\n")
+    sys.stdout.write(f"PASS: the durable-write figures in {page} agree with the measurement.\n")
     return 0
 
 
