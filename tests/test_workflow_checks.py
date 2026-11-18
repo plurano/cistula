@@ -41,6 +41,8 @@ PAGES_HEAD = ("pages.yml", "Stop when main has moved on")
 SHARED_GROUP = "workflow concurrency must give every run outside a pull request a group of its own"
 NO_QUEUE = "deploy job must queue its runs with queue: max"
 CANCELS = "deploy job must not cancel a run in progress"
+# The only workflow-level group accepted; one group per pull request, one per run otherwise.
+RUN_GROUP = "pages-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}"
 
 TRAILER = "\n\nSigned-off-by: Tester <tester@example.com>"
 
@@ -677,7 +679,7 @@ def pages_concurrency_problems(lines: list[str]) -> list[str]:
     """Find concurrency that lets one Pages run replace the pending deploy of another."""
     problems: list[str] = []
     workflow = pages_mapping(lines, "concurrency:")
-    if workflow and "github.run_id" not in workflow.get("group", ""):
+    if workflow and workflow.get("group", "") != RUN_GROUP:
         problems.append(SHARED_GROUP)
     start = lines.index("  deploy:")
     end = next(
@@ -700,6 +702,19 @@ def test_pages_concurrency_refuses_a_shared_group() -> None:
     """A workflow-level concurrency group shared across main runs is refused."""
     committed = workflow_lines("pages.yml")
     lines = ["  group: pages-${{ github.ref }}" if line.startswith("  group:") else line for line in committed]
+    assert lines != committed
+    assert pages_concurrency_problems(lines) == [SHARED_GROUP]
+
+
+def test_pages_concurrency_refuses_a_reversed_group() -> None:
+    """A group that gives main pushes one shared group is refused."""
+    committed = workflow_lines("pages.yml")
+    lines = [
+        "  group: pages-${{ github.event_name == 'pull_request' && github.run_id || github.ref }}"
+        if line.startswith("  group:")
+        else line
+        for line in committed
+    ]
     assert lines != committed
     assert pages_concurrency_problems(lines) == [SHARED_GROUP]
 
