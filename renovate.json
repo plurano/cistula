@@ -8,6 +8,13 @@
   ],
   "packageRules": [
     {
+      "description": "The engine pin is read through git-refs, which gives no release timestamp, and Renovate holds an update without one for good under the shared preset's release age (minimumReleaseAgeBehaviour timestamp-required); the engine is family-owned, so its pin waits for no release age",
+      "matchDepNames": [
+        "praetor-workflow-engine-pin"
+      ],
+      "minimumReleaseAge": null
+    },
+    {
       "description": "praetor-managed files: praetorctl adopt ships their updates and praetorctl audit locks them byte for byte",
       "matchFileNames": [
         ".devcontainer/devcontainer.json",
