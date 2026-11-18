@@ -1,6 +1,6 @@
 # ADR-0001: Release job: one reproducible build, a dry run while the repository is private
 
-- **Status**: Accepted (2026-10-17, after the tag run of `v0.1.0`)
+- **Status**: Superseded by [ADR-0003](0003-release-job.md) (2026-11-18); accepted 2026-10-17, after the tag run of `v0.1.0`
 - **Date**: 2026-10-11
 - **Authors**: lusoris
 
@@ -11,10 +11,10 @@ pin by hash. Four facts shape the job that builds it.
 
 1. **The bytes depend on the commit only.** `make package` gives the same
    source distribution and the same wheel on every host
-   ([README](../development.md#reproducible-package)), and
+   ([README](../../README.md#reproducible-package)), and
    `make verify-reproducible` fails the gate on one differing byte
-   ([Makefile](https://github.com/plurano/cistula/blob/main/Makefile), [tools/compare_packages.py](https://github.com/plurano/cistula/blob/main/tools/compare_packages.py),
-   [tests/test_compare_packages.py](https://github.com/plurano/cistula/blob/main/tests/test_compare_packages.py)).
+   ([Makefile](../../Makefile), [tools/compare_packages.py](../../tools/compare_packages.py),
+   [tests/test_compare_packages.py](../../tests/test_compare_packages.py)).
    A hash therefore names a commit, not a build host or a build run.
    Measured across hosts for commit `02ae449`: the run on `main` and a local
    build on another distribution and interpreter patch version print the same
@@ -22,8 +22,8 @@ pin by hash. Four facts shape the job that builds it.
    (comparison recorded on pull request 2 of the private predecessor repository
    `plurano/python-library`, comment 6104646636).
 2. **The repository is private and nothing is released yet**
-   (`visibility: private` in [.standards.yaml](https://github.com/plurano/cistula/blob/main/.standards.yaml);
-   `version` in [pyproject.toml](https://github.com/plurano/cistula/blob/main/pyproject.toml)). The name `cistula`
+   (`visibility: private` in [.standards.yaml](../../.standards.yaml);
+   `version` in [pyproject.toml](../../pyproject.toml)). The name `cistula`
    is chosen (fleet answer ledger, `python-library-name`, 2026-10-12) and is
    final with the first release. Nothing is published before the repository
    turns public. The first release, version 0.1.0, follows that change and
@@ -31,7 +31,7 @@ pin by hash. Four facts shape the job that builds it.
    ledger, `python-library-first-release`, 2026-10-12; before it
    `python-library-release-precedent`, 2026-10-11).
 3. **The declared supply chain is ahead of the workflows.**
-   [.config/archetypes/framework.yaml](https://github.com/plurano/cistula/blob/main/.config/archetypes/framework.yaml)
+   [.config/archetypes/framework.yaml](../../.config/archetypes/framework.yaml)
    declares `slsa_level: 3`, `enforce_cosign: true` and `require_sbom: true`.
    Until the change that adds the workflows below, `.standards.yaml` carried
    one HISS-11 exception for `.github/workflows/release.yml`. That change
@@ -64,7 +64,7 @@ make package          # prints the two hashes of dist/
 ```
 
 The hash to pin is the one the `Verification gate` run on `main` prints for
-that commit ([.github/workflows/ci.yml](https://github.com/plurano/cistula/blob/main/.github/workflows/ci.yml)); a
+that commit ([.github/workflows/ci.yml](../../.github/workflows/ci.yml)); a
 local build must print the same one. The hashes a pull request run prints are
 not to be pinned: that run builds the forge's test merge commit, which has its
 own date (README, "Two limits").
@@ -92,25 +92,25 @@ The split is what the standards engine measures as SLSA Build Level 3: the
 build runs in a reusable workflow of this repository, in the job that also
 attests it, and nothing is downloaded into that job before the attestation
 (engine guide `docs/guides/releasing.md` at the commit that
-`PRAETOR_REF` in [ci.yml](https://github.com/plurano/cistula/blob/main/.github/workflows/ci.yml) pins). It is built
+`PRAETOR_REF` in [ci.yml](../../.github/workflows/ci.yml) pins). It is built
 in from the start so that the build path does not change when signing is
 added.
 
 PyPI does not accept a reusable workflow as a trusted publisher
 ([PyPI troubleshooting page](https://docs.pypi.org/trusted-publishers/troubleshooting/)).
 The upload is therefore a job of
-[release.yml](https://github.com/plurano/cistula/blob/main/.github/workflows/release.yml) itself, and the publisher
+[release.yml](../../.github/workflows/release.yml) itself, and the publisher
 registered on PyPI names that file and the environment `pypi`.
 
 Steps of the one job in `release-build.yml`, in order:
 
 1. Check out with full history and without stored credentials; install the
-   supported interpreters as [ci.yml](https://github.com/plurano/cistula/blob/main/.github/workflows/ci.yml) does.
+   supported interpreters as [ci.yml](../../.github/workflows/ci.yml) does.
 2. On a tag: refuse unless the tag is `v` plus the `version` of
-   [pyproject.toml](https://github.com/plurano/cistula/blob/main/pyproject.toml), and unless the tagged commit is an
+   [pyproject.toml](../../pyproject.toml), and unless the tagged commit is an
    ancestor of `origin/main`.
 3. Install the pinned trivy with
-   [.github/actions/install-trivy](https://github.com/plurano/cistula/blob/main/.github/actions/install-trivy/action.yml),
+   [.github/actions/install-trivy](../../.github/actions/install-trivy/action.yml),
    the action the gate uses, then
    `make verify REUSE="pipx run reuse==6.2.0" TRIVY=<its path>`.
 4. Write `SHA256SUMS` for the two files of `dist/` and print it into the run
@@ -148,7 +148,7 @@ The publication channels are decided (fleet answer ledger,
 version 0.1.0, follows the change of the repository to public. When a tag
 `v*` is pushed:
 
-1. `build` invokes [.github/workflows/release-build.yml](https://github.com/plurano/cistula/blob/main/.github/workflows/release-build.yml)
+1. `build` invokes [.github/workflows/release-build.yml](../../.github/workflows/release-build.yml)
    with `sign: true`, building the package with `make verify`, writing
    `SHA256SUMS`, generating Syft SBOMs, signing `SHA256SUMS` with Cosign, and
    attesting build provenance.
