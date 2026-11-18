@@ -38,6 +38,9 @@ PACKAGE_PICK = ("release.yml", "Pick the two package files")
 ENGINE_BUILD = ("ci.yml", "Build pinned praetorctl from the published Praetor commit")
 ENGINE_PIN_TEST = 'rev-parse HEAD)" = "$PRAETOR_REF"'
 PAGES_HEAD = ("pages.yml", "Stop when main has moved on")
+SHARED_GROUP = "workflow concurrency must give every run outside a pull request a group of its own"
+NO_QUEUE = "deploy job must queue its runs with queue: max"
+CANCELS = "deploy job must not cancel a run in progress"
 
 TRAILER = "\n\nSigned-off-by: Tester <tester@example.com>"
 
@@ -650,3 +653,80 @@ def test_pages_push_needs_a_push_trigger() -> None:
     """A missing push trigger is refused."""
     with pytest.raises(ValueError, match="no push trigger in on block"):
         pages_push_problems(["on:", "  workflow_dispatch:", "jobs:"])
+
+
+def pages_mapping(lines: list[str], header: str) -> dict[str, str]:
+    """Read the flat key-value lines indented two spaces deeper than `header`."""
+    if header not in lines:
+        return {}
+    depth = _indent(header) + 2
+    mapping: dict[str, str] = {}
+    for line in lines[lines.index(header) + 1 :]:
+        text = line.strip()
+        if not text or text.startswith("#"):
+            continue
+        key, separator, value = text.partition(":")
+        clean = value.partition(" #")[0].strip()
+        if _indent(line) != depth or not separator or not clean:
+            break
+        mapping[key.strip()] = clean
+    return mapping
+
+
+def pages_concurrency_problems(lines: list[str]) -> list[str]:
+    """Find concurrency that lets one Pages run replace the pending deploy of another."""
+    problems: list[str] = []
+    workflow = pages_mapping(lines, "concurrency:")
+    if workflow and "github.run_id" not in workflow.get("group", ""):
+        problems.append(SHARED_GROUP)
+    start = lines.index("  deploy:")
+    end = next(
+        (i for i in range(start + 1, len(lines)) if lines[i].startswith("  ") and _indent(lines[i]) == 2), len(lines)
+    )
+    deploy = pages_mapping(lines[start:end], "    concurrency:")
+    if deploy.get("queue") != "max":
+        problems.append(NO_QUEUE)
+    if deploy.get("cancel-in-progress", "false") != "false":
+        problems.append(CANCELS)
+    return problems
+
+
+def test_pages_concurrency_admits_the_committed_workflow() -> None:
+    """The committed Pages workflow queues deploys without replacing pending runs."""
+    assert pages_concurrency_problems(workflow_lines("pages.yml")) == []
+
+
+def test_pages_concurrency_refuses_a_shared_group() -> None:
+    """A workflow-level concurrency group shared across main runs is refused."""
+    committed = workflow_lines("pages.yml")
+    lines = ["  group: pages-${{ github.ref }}" if line.startswith("  group:") else line for line in committed]
+    assert lines != committed
+    assert pages_concurrency_problems(lines) == [SHARED_GROUP]
+
+
+@pytest.mark.parametrize(
+    ("removed", "replacement"),
+    [
+        (["      queue: max"], []),
+        (["      queue: max"], ["      queue: single"]),
+        (["    concurrency:", "      group: pages-deploy", "      queue: max"], []),
+    ],
+)
+def test_pages_concurrency_refuses_a_replacing_deploy(removed: list[str], replacement: list[str]) -> None:
+    """A deploy job that does not queue runs with queue: max is refused."""
+    committed = workflow_lines("pages.yml")
+    start = committed.index(removed[0])
+    assert committed[start : start + len(removed)] == removed
+    lines = committed[:start] + replacement + committed[start + len(removed) :]
+    assert lines != committed
+    assert pages_concurrency_problems(lines) == [NO_QUEUE]
+
+
+def test_pages_concurrency_refuses_a_cancelling_deploy() -> None:
+    """A deploy job that cancels a run in progress is refused."""
+    committed = workflow_lines("pages.yml")
+    lines = list(committed)
+    position = lines.index("      queue: max") + 1
+    lines.insert(position, "      cancel-in-progress: true")
+    assert lines != committed
+    assert pages_concurrency_problems(lines) == [CANCELS]
