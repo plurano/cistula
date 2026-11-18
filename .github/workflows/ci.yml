@@ -121,6 +121,12 @@ jobs:
           path: praetor-src
           persist-credentials: false
 
+      # .codacy.yml leaves the engine's hook scripts out of Codacy, so they
+      # have to equal the engine source checked out above; the build step
+      # below removes that checkout.
+      - name: Hold the hook scripts to the pinned engine
+        run: make verify-hook-scripts PRAETOR_SRC=praetor-src
+
       - name: Set up the Go toolchain declared by Praetor
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:

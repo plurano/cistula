@@ -39,7 +39,7 @@ export SOURCE_DATE_EPOCH
 # from running side by side.
 .NOTPARALLEL:
 
-.PHONY: verify-all verify-engine-pin verify fetch environment semgrep-environment verify-static verify-scanners package verify-package-size verify-durable-figures verify-reproducible verify-python lock clean
+.PHONY: verify-all verify-engine-pin verify-codacy verify-hook-scripts verify fetch environment semgrep-environment verify-static verify-scanners package verify-package-size verify-durable-figures verify-reproducible verify-python lock clean
 
 # The one gate is `make verify-all`: CI runs exactly that target, so a local
 # green run and a green status check mean the same thing. It runs this
@@ -63,14 +63,55 @@ verify-engine-pin:
 	@grep -Eqs '^[[:space:]]*PRAETOR_REF[[:space:]]*[:=]' .github/workflows/*.yml .github/workflows/*.yaml || { \
 		printf '%s\n' 'FAIL: no workflow declares PRAETOR_REF, so no engine is pinned.' >&2; exit 1; }
 
+# The files the standards engine writes that .codacy.yml may leave out of
+# Codacy, each held to the engine by a check: verify-hook-scripts compares the
+# hook scripts byte for byte with the engine checkout PRAETOR_SRC names, which
+# CI checks out at the commit ci.yml pins, and `compile-context --verify` in
+# verify-all holds the three client files equal to AGENTS.md, whose blocks
+# adoption renders.
+HOOK_SCRIPTS := checkpoint.py common.py
+CONTEXT_FILES := AGENTS.md CLAUDE.md .gemini/GEMINI.md .codex/rules.md
+CODACY_EXCLUDABLE := $(addprefix .config/lefthook/scripts/,$(HOOK_SCRIPTS)) $(CONTEXT_FILES)
+
+# cmp exits 1 for a difference and 2 when it cannot read a file; both fail.
+verify-hook-scripts:
+	@test -d "$(PRAETOR_SRC)/.config/lefthook/scripts" || { \
+		printf 'FAIL: PRAETOR_SRC names no engine checkout: %s\n' "$(PRAETOR_SRC)" >&2; exit 1; }
+	@for f in $(HOOK_SCRIPTS); do cmp ".config/lefthook/scripts/$$f" \
+		"$(PRAETOR_SRC)/.config/lefthook/scripts/$$f" || exit 1; done
+
+# Codacy skips what .codacy.yml excludes, so the check is an allow-list: every
+# line is blank, a comment, the document start, the exclude_paths key or one of
+# its items, and every item names a file of CODACY_EXCLUDABLE. The exclusions
+# are a declared exception: the one comment `MEL C, ends YYYY-MM-DD` names
+# their last day, and the check fails from the day after. CODACY_TODAY is set
+# by the tests only.
+CODACY_TODAY ?= $(shell date -u +%Y-%m-%d)
+verify-codacy:
+	@test -f .codacy.yml || exit 0; \
+	if grep -vE '^[[:space:]]*(#.*)?$$|^---$$|^exclude_paths:$$|^[[:space:]]+- ' .codacy.yml >&2; then \
+		printf '%s\n' 'FAIL: .codacy.yml holds a line other than a comment, exclude_paths or one of its items' >&2; \
+		exit 1; fi; \
+	allowed=' $(CODACY_EXCLUDABLE) '; \
+	grep -E '^[[:space:]]+- ' .codacy.yml | sed -E 's/^[[:space:]]+-[[:space:]]+//; s/^"(.*)"$$/\1/' \
+		| { bad=0; while IFS= read -r p; do case "$$allowed" in *" $$p "*) ;; *) bad=1; \
+		printf 'FAIL: .codacy.yml excludes %s, which no check here holds to the engine\n' "$$p" >&2;; \
+		esac; done; exit $$bad; } || exit 1; \
+	ends=$$(sed -n -E 's/^[[:space:]]*#.*MEL C, ends ([0-9]{4}-[0-9]{2}-[0-9]{2}).*$$/\1/p' .codacy.yml); \
+	case "$$ends" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *) \
+		printf '%s\n' 'FAIL: .codacy.yml names no single end date as "MEL C, ends YYYY-MM-DD"' >&2; exit 1;; esac; \
+	test "$$(printf '%s' '$(CODACY_TODAY)' | tr -d -)" -le "$$(printf '%s' "$$ends" | tr -d -)" || { \
+		printf 'FAIL: the exclusions of .codacy.yml ended on %s; drop them or renew the date with a reason\n' \
+		"$$ends" >&2; exit 1; }
+
 # This repository's own checks; they need no engine. `fetch` is the only step
 # that reaches the network (the package index, and ghcr.io for the trivy
 # database); everything after it runs offline.
-verify: fetch verify-static verify-scanners package verify-package-size verify-durable-figures verify-reproducible
+verify: fetch verify-static verify-codacy verify-scanners package verify-package-size verify-durable-figures verify-reproducible
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory verify-python PYTHON="$$python"; \
 	done
-	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Python versions, semgrep and trivy scans, package, its size as the README states it, the durable-write figures the README states, same bytes from a second build, a consumer install by hash, and its tests on $(PYTHONS).'
+	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Codacy exclusions, Python versions, semgrep and trivy scans, package, its size as the README states it, the durable-write figures the README states, same bytes from a second build, a consumer install by hash, and its tests on $(PYTHONS).'
 
 fetch:
 	@set -e; for python in $(PYTHONS); do \

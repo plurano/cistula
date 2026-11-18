@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import textwrap
@@ -252,15 +253,12 @@ def test_engine_pin_refuses_another_commit(tmp_path: Path, reference: str) -> No
     assert engine_pin(tmp_path, reference).returncode == 1
 
 
-def verify_engine_pin(tmp_path: Path, workflow: str | None) -> subprocess.CompletedProcess[str]:
+def run_make(tmp_path: Path, target: str, *variables: str) -> subprocess.CompletedProcess[str]:
+    """Run `target` of a copy of the Makefile in `tmp_path/work`, which the caller has filled."""
     copy = tmp_path / "work"
-    copy.mkdir()
     shutil.copyfile(os.path.join(REPOSITORY, "Makefile"), copy / "Makefile")
-    if workflow is not None:
-        (copy / ".github" / "workflows").mkdir(parents=True)
-        (copy / ".github" / "workflows" / "ci.yml").write_text(workflow, encoding="utf-8")
     return subprocess.run(
-        [str(PROGRAMS["make"]), "-s", "-f", "Makefile", "verify-engine-pin"],
+        [str(PROGRAMS["make"]), "-s", "-f", "Makefile", target, *variables],
         cwd=copy,
         env={**ENV, "HOME": str(tmp_path)},
         capture_output=True,
@@ -268,6 +266,15 @@ def verify_engine_pin(tmp_path: Path, workflow: str | None) -> subprocess.Comple
         timeout=60,
         check=False,
     )
+
+
+def verify_engine_pin(tmp_path: Path, workflow: str | None) -> subprocess.CompletedProcess[str]:
+    copy = tmp_path / "work"
+    copy.mkdir()
+    if workflow is not None:
+        (copy / ".github" / "workflows").mkdir(parents=True)
+        (copy / ".github" / "workflows" / "ci.yml").write_text(workflow, encoding="utf-8")
+    return run_make(tmp_path, "verify-engine-pin")
 
 
 def test_verify_engine_pin_admits_a_workflow_that_pins_the_engine(tmp_path: Path) -> None:
@@ -279,6 +286,99 @@ def test_verify_engine_pin_refuses_a_missing_pin(tmp_path: Path, workflow: str |
     result = verify_engine_pin(tmp_path, workflow)
     assert result.returncode != 0
     assert "no workflow declares PRAETOR_REF" in result.stderr
+
+
+HOOK_SCRIPTS = ("checkpoint.py", "common.py")
+CODACY_HELD = '# Entered 2026-11-18, MEL C, ends 2026-11-28.\nexclude_paths:\n  - "AGENTS.md"\n  - ".codex/rules.md"\n'
+
+
+def verify_codacy(tmp_path: Path, text: str | None, today: str) -> subprocess.CompletedProcess[str]:
+    copy = tmp_path / "work"
+    copy.mkdir()
+    if text is not None:
+        (copy / ".codacy.yml").write_text(text, encoding="utf-8")
+    return run_make(tmp_path, "verify-codacy", f"CODACY_TODAY={today}")
+
+
+def test_verify_codacy_admits_the_committed_file_on_its_last_day(tmp_path: Path) -> None:
+    with open(os.path.join(REPOSITORY, ".codacy.yml"), encoding="utf-8") as handle:
+        committed = handle.read()
+    ends = re.findall(r"MEL C, ends (\d{4}-\d{2}-\d{2})", committed)
+    assert len(ends) == 1, f".codacy.yml names {len(ends)} end dates"
+    result = verify_codacy(tmp_path, committed, ends[0])
+    assert result.returncode == 0, result.stderr
+
+
+def test_verify_codacy_admits_a_tree_without_the_file(tmp_path: Path) -> None:
+    assert verify_codacy(tmp_path, None, "2026-11-18").returncode == 0
+
+
+def test_verify_codacy_refuses_the_day_after_the_end(tmp_path: Path) -> None:
+    result = verify_codacy(tmp_path, CODACY_HELD, "2026-11-29")
+    assert result.returncode != 0
+    assert "ended on 2026-11-28" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("line", "message"),
+    [
+        ('  - "src/cistula/process.py"\n', "excludes src/cistula/process.py, which no check"),
+        ('  - "tools/**"\n', "excludes tools/**, which no check"),
+        ("engines: {}\n", "a line other than a comment"),
+    ],
+)
+def test_verify_codacy_refuses_an_exclusion_it_does_not_hold(tmp_path: Path, line: str, message: str) -> None:
+    result = verify_codacy(tmp_path, CODACY_HELD + line, "2026-11-18")
+    assert result.returncode != 0
+    assert message in result.stderr
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        CODACY_HELD.replace("MEL C, ends 2026-11-28", "MEL C"),
+        CODACY_HELD + "# MEL C, ends 2026-11-30\n",
+    ],
+)
+def test_verify_codacy_refuses_a_file_without_one_end_date(tmp_path: Path, text: str) -> None:
+    result = verify_codacy(tmp_path, text, "2026-11-18")
+    assert result.returncode != 0
+    assert "names no single end date" in result.stderr
+
+
+@pytest.fixture
+def engine_scripts(tmp_path: Path) -> Path:
+    """Copy the committed hook scripts into `tmp_path/work` and into an engine checkout; return the checkout."""
+    for root in (tmp_path / "work", tmp_path / "engine"):
+        scripts = root / ".config" / "lefthook" / "scripts"
+        scripts.mkdir(parents=True)
+        for name in HOOK_SCRIPTS:
+            shutil.copyfile(os.path.join(REPOSITORY, ".config", "lefthook", "scripts", name), scripts / name)
+    return tmp_path / "engine"
+
+
+def test_verify_hook_scripts_admits_the_scripts_of_the_engine(tmp_path: Path, engine_scripts: Path) -> None:
+    result = run_make(tmp_path, "verify-hook-scripts", f"PRAETOR_SRC={engine_scripts}")
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("name", HOOK_SCRIPTS)
+def test_verify_hook_scripts_refuses_a_script_that_differs(tmp_path: Path, engine_scripts: Path, name: str) -> None:
+    with open(engine_scripts / ".config" / "lefthook" / "scripts" / name, "a", encoding="utf-8") as handle:
+        handle.write("# planted\n")
+    assert run_make(tmp_path, "verify-hook-scripts", f"PRAETOR_SRC={engine_scripts}").returncode != 0
+
+
+def test_verify_hook_scripts_refuses_a_script_the_engine_lacks(tmp_path: Path, engine_scripts: Path) -> None:
+    (engine_scripts / ".config" / "lefthook" / "scripts" / "common.py").unlink()
+    assert run_make(tmp_path, "verify-hook-scripts", f"PRAETOR_SRC={engine_scripts}").returncode != 0
+
+
+@pytest.mark.usefixtures("engine_scripts")
+def test_verify_hook_scripts_refuses_a_missing_engine_checkout(tmp_path: Path) -> None:
+    result = run_make(tmp_path, "verify-hook-scripts", f"PRAETOR_SRC={tmp_path / 'none'}")
+    assert result.returncode != 0
+    assert "PRAETOR_SRC names no engine checkout" in result.stderr
 
 
 def _on_block(lines: list[str]) -> list[str]:

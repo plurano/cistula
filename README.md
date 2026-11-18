@@ -250,8 +250,8 @@ no workflow declares the pin.
 
 1. One environment per interpreter is installed from `requirements/dev.txt`.
    Every package is pinned by hash; nothing else is installed.
-2. Format, lint, types, licence headers, the exception list and the list of
-   supported Python versions are checked once. Then
+2. Format, lint, types, licence headers, the exception list, the Codacy
+   exclusions and the list of supported Python versions are checked once. Then
    [tools/scanners.py](tools/scanners.py) runs semgrep with the rules in
    [.config/semgrep/hiss.yml](.config/semgrep/hiss.yml) and trivy on both
    locks. Each scanner first has to report the defects planted in a scratch
@@ -333,6 +333,13 @@ expiry at most 90 days ahead. The gate fails when an entry has expired, when
 its file is gone or passes the check again, and when `ruff.toml` leaves a file
 out of the lint without an entry. The three entries today are scripts the
 standards engine writes; they end when the engine ships them clean.
+
+Codacy skips the files [.codacy.yml](.codacy.yml) names: the four agent
+context files and the engine's hook script `common.py`, all written by the
+standards engine. `make verify-codacy` admits only files that a check here
+holds to the engine (`praetorctl compile-context --verify` for the context
+files, `make verify-hook-scripts` in CI for the script), and it fails from the
+day after the end date the file names, ten days after the entry.
 
 ## Licence
 
