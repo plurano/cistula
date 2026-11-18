@@ -14,8 +14,9 @@ from Greek *kiste*. The repository, the distribution and the import package
 all carry the name `cistula`.
 
 - Uses the standard library only, and no function contacts a network.
-- `run` has no default time limit and kills the whole process group when it
-  expires.
+- `run` has no default time limit and sends the whole process group `SIGTERM`
+  when it expires, then `SIGKILL` while the child runs or its output pipes stay
+  open.
 - `read_json` refuses repeated keys and `NaN` / `Infinity`.
 - The writers replace a file in one step and are durable by default.
 - The same commit builds the same package bytes on every host and every
@@ -35,7 +36,7 @@ flowchart TD
   files["files"]:::step
   digest["digest"]:::step
   limit["Run under a stated<br/>time limit"]:::decide
-  kill["On expiry: SIGTERM, then<br/>SIGKILL to whole process group"]:::step
+  kill["On expiry: SIGTERM to group,<br/>SIGKILL while child runs"]:::step
   read["Read: refuse repeated<br/>keys and NaN"]:::step
   write["Write: temporary file, flush,<br/>rename, flush directory"]:::step
   sha["SHA-256 of a file,<br/>bytes or text"]:::step

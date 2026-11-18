@@ -75,6 +75,23 @@ def test_a_new_pages_interpreter_names_both_docs_lock_places(copy: str) -> None:
     assert [text.split(":")[0] for text in check.problems(copy)] == [check.MAKEFILE, check.DOCS_LOCK]
 
 
+def test_a_pages_workflow_without_an_interpreter_fails(copy: str) -> None:
+    """A Pages workflow that sets up no Python interpreter is refused."""
+    change(copy, check.PAGES_WORKFLOW, '          python-version: "3.14"\n', "")
+    change(copy, check.MAKEFILE, " --python-version=3.14", "")
+    change(copy, check.DOCS_LOCK, " --python-version=3.14", "")
+
+    assert [text.split(":")[0] for text in check.problems(copy)] == [check.PAGES_WORKFLOW]
+
+
+def test_a_pages_workflow_with_two_interpreters_fails(copy: str) -> None:
+    """A Pages workflow that sets up more than one Python interpreter is refused."""
+    line = '          python-version: "3.14"\n'
+    change(copy, check.PAGES_WORKFLOW, line, line + line)
+
+    assert check.problems(copy)[0].split(":")[0] == check.PAGES_WORKFLOW
+
+
 @pytest.mark.parametrize(
     ("file", "old", "new", "place"),
     [
@@ -172,7 +189,7 @@ def test_a_floor_that_moves_in_the_classifiers_only_names_every_other_place(copy
 
     found = check.problems(copy)
 
-    assert len(found) == len(check.places(copy)) - 3
+    assert len(found) == len(check.places(copy)) - 4
     assert not any("classifiers" in text for text in found)
 
 
@@ -204,7 +221,7 @@ def test_no_classifier_names_a_version(copy: str, old: str, new: str) -> None:
 
     assert check.supported(copy) == []
     assert found[0].startswith("pyproject.toml: classifiers: names None")
-    assert len(found) == len(check.places(copy)) - 2
+    assert len(found) == len(check.places(copy)) - 3
 
 
 @pytest.mark.parametrize("file", [check.WORKFLOW, check.RELEASE_WORKFLOW])

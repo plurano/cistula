@@ -39,12 +39,14 @@ the reason given:
 
 Where cistula goes further than the compared libraries:
 
-- `run` requires a time limit, kills the whole process group when the limit
-  passes, and builds the environment of the child from an allow-list
-  (`child_env`). The compared wrappers make the time limit optional and pass
-  the full environment on to the child. sh, plumbum, sarge and invoke kill
-  only the child on a timeout; sh kills the group only when the caller asks
-  for it.
+- `run` requires a time limit and sends the whole process group `SIGTERM` when
+  the limit passes, followed by `SIGKILL` while the child is still running or a
+  group member still holds its output pipes open. `env` replaces the whole
+  environment of the child, and without `env` the child inherits the caller's
+  full environment; `child_env` builds an environment from an allow-list for
+  the caller to pass as `env`. The compared wrappers make the time limit
+  optional. sh, plumbum, sarge and invoke kill only the child on a timeout; sh
+  kills the group only when the caller asks for it.
 - The writers flush the directory as well as the file. Of the compared
   libraries, only atomicwrites flushes the directory, boltons flushes the file
   only, and safer flushes neither.

@@ -110,6 +110,7 @@ def places(root: str) -> list[tuple[str, object, object]]:
         (f"{LINT_CONFIG}: target-version", _table(root, LINT_CONFIG).get("target-version"), _lint_target(floor)),
         (f"{MAKEFILE}: PYTHONS", _gate_interpreters(root), versions),
         (f"{MAKEFILE}: --python-version of the lock", package_lock, [floor]),
+        (f"{PAGES_WORKFLOW}: python-version", pages, "exactly one version"),
         (f"{MAKEFILE}: --python-version of the docs lock", docs_lock, pages),
         (f"{DOCS_LOCK}: --python-version in the header", _LOCK_TARGET.findall(_text(root, DOCS_LOCK)), pages),
         (f"{LOCK}: --python-version in the header", _LOCK_TARGET.findall(_text(root, LOCK)), [floor]),
@@ -126,7 +127,12 @@ def problems(root: str) -> list[str]:
     """Return every place whose versions differ from the classifiers; empty when all agree."""
     found = []
     for place, named, expected in places(root):
-        agrees = named is not None if expected == "at least one version" else named == expected
+        if expected == "at least one version":
+            agrees = named is not None
+        elif expected == "exactly one version":
+            agrees = isinstance(named, list) and len(named) == 1
+        else:
+            agrees = named == expected
         if not agrees:
             found.append(f"{place}: names {named!r}, has to name {expected!r}")
     return found

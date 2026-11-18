@@ -5,8 +5,8 @@
 The readers decode UTF-8, read one document or JSON Lines (one document per
 line), and refuse two things the standard library accepts
 silently: an object that names the same key twice (it keeps the last value)
-and a number JSON does not have (NaN, an infinity, a number too large for a
-float).
+and a non-finite float (NaN, an infinity, or a floating-point literal that
+overflows a float; integers of any size are read as `int`).
 
 The writers put the new content into a temporary file beside the target, flush
 it to disk and rename it over the target in one step: after a failure or a
@@ -112,12 +112,14 @@ def loads_json(text: str, *, unique_keys: bool = True, finite_numbers: bool = Tr
     `unique_keys=False` restores the standard library's behaviour of keeping
     the last value.
 
-    `NaN`, `Infinity` and `-Infinity`, which JSON does not have, and a number
-    too large for a float raise `ValueError`. `finite_numbers=False` restores
-    the standard library's behaviour: the three names are read as these
-    numbers and a number too large is read as an infinity. `write_json`
-    refuses to write any of them, so only a document read with the default can
-    always be written back.
+    `NaN`, `Infinity` and `-Infinity`, which JSON does not have, and a
+    floating-point literal (with a fraction or an exponent) that overflows a
+    float raise `ValueError`; an integer of any size is read as `int`.
+    `finite_numbers=False` restores the standard library's behaviour: the
+    three names are read as these floats and an overflowing float literal is
+    read as an infinity. `write_json` writes integers of any size and refuses
+    non-finite floats (`nan`, `inf` and `-inf`), so only a document read with
+    the default can always be written back.
 
     Each keyword lifts its one check and nothing else. Everything else is
     `json.loads`: malformed text raises `json.JSONDecodeError`. All of these
@@ -141,10 +143,11 @@ def read_json(path: _Path, *, unique_keys: bool = True, finite_numbers: bool = T
     """Read a UTF-8 JSON file strictly; see `loads_json` for the two keywords.
 
     An object with a repeated key raises `DuplicateKeyError`; NaN, an
-    infinity and a number too large for a float raise `ValueError`. Bytes that
-    are not UTF-8 raise `UnicodeDecodeError`, malformed JSON (including a
-    byte-order mark) raises `json.JSONDecodeError`. All of these are
-    `ValueError`. A missing or unreadable file raises `OSError`.
+    infinity and a floating-point literal that overflows a float raise
+    `ValueError` (integers of any size are read as `int`). Bytes that are not
+    UTF-8 raise `UnicodeDecodeError`, malformed JSON (including a byte-order
+    mark) raises `json.JSONDecodeError`. All of these are `ValueError`. A
+    missing or unreadable file raises `OSError`.
     """
     with open(path, "rb") as handle:
         text = handle.read().decode("utf-8")

@@ -8,9 +8,15 @@ SPDX-License-Identifier: EUPL-1.2
 - **Time limit.** `run` has no default time limit and accepts no value that
   means "for ever": zero, a negative number, infinity and NaN are refused.
 - **Group kill.** The child runs in a process group of its own. When the limit
-  expires the whole group gets `SIGTERM` and, after `kill_after` seconds,
-  `SIGKILL`. A child that ignores the first signal, or a descendant that holds
-  the output open, cannot keep the caller waiting.
+  expires the whole group gets `SIGTERM`; `SIGKILL` follows `kill_after`
+  seconds later only while the child is still running or a group member still
+  holds the child's output pipes open. When the child exits on `SIGTERM` and
+  no member holds the pipes, `run` returns at once and sends no `SIGKILL`
+  (a group member that ignores `SIGTERM` and writes its output elsewhere keeps
+  running; see [Limits](limits.md) and
+  [issue 82](https://github.com/plurano/cistula/issues/82)). A child that
+  ignores the first signal, or a descendant that holds the output open, cannot
+  keep the caller waiting.
 - **Atomic write.** New content goes to a temporary file in the same directory,
   is flushed to disk and then replaces the target in one step. A failure at any
   point before the replace leaves the old file whole and no temporary file
@@ -91,9 +97,11 @@ SPDX-License-Identifier: EUPL-1.2
   `test_new_directories_take_their_permissions_from_the_umask`,
   `test_directories_created_stay_when_the_write_fails`).
 - **Strict JSON.** A repeated key, a byte-order mark and invalid UTF-8 are
-  errors when reading. So are NaN, the two infinities and a number too large
-  for a float, none of which JSON has: `json.loads` reads them silently, the
-  readers raise `ValueError`. `write_json` refuses the same values and leaves
+  errors when reading. So are `NaN`, the two infinities and a floating-point
+  literal (a number with a fraction or an exponent) that overflows a float:
+  `json.loads` reads them silently, the readers raise `ValueError`. An integer
+  of any size is read as a Python `int` and `write_json` writes it;
+  `write_json` refuses non-finite floats (`nan`, `inf` and `-inf`) and leaves
   the old file whole. A caller that must read a file holding such a number
   passes `finite_numbers=False`; that lifts this one check and no other, as
   `unique_keys=False` does for a repeated key

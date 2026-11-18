@@ -3,10 +3,13 @@
 """Run a child process under a time limit that the caller must state.
 
 `run` starts the command in a process group of its own. When the time limit
-expires, the whole group is asked to stop and, after a grace period, killed,
-so a child that ignores the first signal or leaves a descendant behind cannot
-keep the caller waiting. `child_env` builds the environment for such a child
-without touching the environment of the calling process.
+expires, the whole group gets SIGTERM and, after a grace period, SIGKILL while
+the child still runs or a group member still holds its output open, so a child
+that ignores the first signal or a descendant that holds the output cannot
+keep the caller waiting. A group member that ignores SIGTERM after the child
+has exited keeps running (https://github.com/plurano/cistula/issues/82).
+`child_env` builds the environment for such a child without touching the
+environment of the calling process.
 
 POSIX only, and tested on Linux only: process groups and their signals do not
 exist on Windows, and `run` refuses to start there instead of running without
@@ -247,7 +250,8 @@ def run(  # noqa: PLR0913 - one keyword per independent setting of a child proce
 
     `timeout` is required and has no value that means "no limit": it must be a
     finite number of seconds greater than zero. When it expires, the child's
-    process group receives SIGTERM, then SIGKILL after `kill_after` seconds,
+    process group receives SIGTERM, then SIGKILL after `kill_after` seconds
+    while the child still runs or a group member still holds its output open,
     and the call returns with `timed_out` set. The longest a call can take is
     `timeout + kill_after` plus one second for reading the remaining output.
 

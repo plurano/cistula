@@ -14,8 +14,13 @@ SPDX-License-Identifier: EUPL-1.2
   which the writers do not call. Process groups do not exist on Windows; `run`
   raises `NotImplementedError` there instead of running without the guarantee.
 - A descendant that moves itself into another session leaves the group and
-  outlives the kill. `run` still returns within the limit plus the grace
-  period.
+  outlives the kill. `run` still returns within `timeout + kill_after` plus
+  one second for reading the remaining output.
+- When a timed-out child exits on `SIGTERM` and no group member holds its
+  output pipes open, `run` returns at once without sending `SIGKILL`; a group
+  member that ignores `SIGTERM` and writes its output elsewhere keeps running
+  ([issue 82](https://github.com/plurano/cistula/issues/82)). `run` still
+  returns within the same bound.
 - When the whole process is killed between write and replace, or inside a
   block, the old file is whole, but the temporary file
   `.<name>.<16 hex digits>.tmp` stays in the directory. The temporary file of
