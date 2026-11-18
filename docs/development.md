@@ -95,7 +95,10 @@ version is the floor. Every version on it is tested: `PYTHONS` in the
 [Makefile](https://github.com/plurano/cistula/blob/main/Makefile) and the interpreter list in
 [ci.yml](https://github.com/plurano/cistula/blob/main/.github/workflows/ci.yml) name the same versions, and
 `requires-python`, the lint target in [ruff.toml](https://github.com/plurano/cistula/blob/main/ruff.toml), `python_version`
-of the type check and the lock are set to the floor.
+of the type check and the package lock are set to the floor. The documentation
+lock is compiled for the interpreter
+[pages.yml](https://github.com/plurano/cistula/blob/main/.github/workflows/pages.yml) sets up, since the site
+builds there.
 [tools/check_python_versions.py](https://github.com/plurano/cistula/blob/main/tools/check_python_versions.py) fails the
 gate when one of these places disagrees, so adding or dropping a version means
 changing all of them in one commit, and then `make lock`.
