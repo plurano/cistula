@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: EUPL-1.2
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import os
 import shutil
 import subprocess
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 SCRIPT = script("check_exceptions")
-TODAY = datetime.date(2026, 10, 11)
+TODAY = dt.date(2026, 10, 11)
 
 # Planted files, judged by ruff's default rules in the planted repository.
 FAILS_LINT = "import os\n"
@@ -34,7 +34,7 @@ def entry(file: str | None = "hook.py", **changes: Any) -> dict[str, Any]:
 
 
 def _toml(value: Any) -> str:
-    if isinstance(value, datetime.date):
+    if isinstance(value, dt.date):
         return value.isoformat()
     if isinstance(value, str):
         return '"' + value.replace("\\", "\\\\") + '"'
@@ -73,7 +73,7 @@ def never_passes(_root: str, _file: str) -> bool:
 def test_the_list_of_this_repository_holds_today() -> None:
     # The real list, the real linter, the real date: this test fails on the day
     # after an entry expires and as soon as an entry is no longer needed.
-    assert check.problems(REPOSITORY, datetime.datetime.now(tz=datetime.UTC).date()) == []
+    assert check.problems(REPOSITORY, dt.datetime.now(tz=dt.UTC).date()) == []
 
 
 def test_the_list_of_this_repository_names_exact_files_with_a_reason_that_links_an_issue() -> None:
@@ -114,19 +114,19 @@ def test_an_entry_that_expires_today_still_holds(tmp_path: Path) -> None:
 
 
 def test_an_expired_entry_fails(tmp_path: Path) -> None:
-    yesterday = TODAY - datetime.timedelta(days=1)
+    yesterday = TODAY - dt.timedelta(days=1)
     assert check.problems(plant(tmp_path, [entry(expires=yesterday)]), TODAY, never_passes) == [
         "entry 1: hook.py: expired on 2026-10-10"
     ]
 
 
 def test_an_expiry_ninety_days_ahead_holds(tmp_path: Path) -> None:
-    limit = TODAY + datetime.timedelta(days=90)
+    limit = TODAY + dt.timedelta(days=90)
     assert check.problems(plant(tmp_path, [entry(expires=limit)]), TODAY, never_passes) == []
 
 
 def test_an_expiry_more_than_ninety_days_ahead_fails(tmp_path: Path) -> None:
-    beyond = TODAY + datetime.timedelta(days=91)
+    beyond = TODAY + dt.timedelta(days=91)
     assert check.problems(plant(tmp_path, [entry(expires=beyond)]), TODAY, never_passes) == [
         "entry 1: hook.py: expires 2027-01-10, more than 90 days ahead"
     ]
@@ -214,7 +214,7 @@ def test_an_extra_field_is_refused(tmp_path: Path) -> None:
     "changes",
     [
         {"expires": "2026-10-11"},
-        {"expires": datetime.datetime(2026, 10, 11, 12, 0, tzinfo=datetime.UTC)},
+        {"expires": dt.datetime(2026, 10, 11, 12, 0, tzinfo=dt.UTC)},
         {"reason": 7},
     ],
 )
@@ -230,7 +230,7 @@ def test_a_table_of_another_name_is_refused(tmp_path: Path) -> None:
 
 
 def test_every_problem_is_reported_not_only_the_first(tmp_path: Path) -> None:
-    yesterday = TODAY - datetime.timedelta(days=1)
+    yesterday = TODAY - dt.timedelta(days=1)
     root = plant(tmp_path, [entry(expires=yesterday), entry("gone.py")], files={"hook.py": CLEAN})
     assert check.problems(root, TODAY) == [
         "entry 1: hook.py: expired on 2026-10-10",
@@ -276,7 +276,7 @@ def _run_script(root: Path) -> subprocess.CompletedProcess[str]:
 
 
 def test_the_script_passes_on_a_list_that_holds(tmp_path: Path) -> None:
-    soon = datetime.datetime.now(tz=datetime.UTC).date() + datetime.timedelta(days=30)
+    soon = dt.datetime.now(tz=dt.UTC).date() + dt.timedelta(days=30)
     plant(tmp_path, [entry(expires=soon)])
     done = _run_script(tmp_path)
     assert (done.returncode, done.stderr) == (0, "")
@@ -284,7 +284,7 @@ def test_the_script_passes_on_a_list_that_holds(tmp_path: Path) -> None:
 
 
 def test_the_script_fails_on_an_expired_entry(tmp_path: Path) -> None:
-    yesterday = datetime.datetime.now(tz=datetime.UTC).date() - datetime.timedelta(days=1)
+    yesterday = dt.datetime.now(tz=dt.UTC).date() - dt.timedelta(days=1)
     plant(tmp_path, [entry(expires=yesterday)])
     done = _run_script(tmp_path)
     assert (done.returncode, done.stdout) == (1, "")
@@ -292,7 +292,7 @@ def test_the_script_fails_on_an_expired_entry(tmp_path: Path) -> None:
 
 
 def test_the_script_fails_on_a_stale_entry(tmp_path: Path) -> None:
-    soon = datetime.datetime.now(tz=datetime.UTC).date() + datetime.timedelta(days=30)
+    soon = dt.datetime.now(tz=dt.UTC).date() + dt.timedelta(days=30)
     plant(tmp_path, [entry(expires=soon)], files={"hook.py": CLEAN})
     done = _run_script(tmp_path)
     assert (done.returncode, done.stdout) == (1, "")
