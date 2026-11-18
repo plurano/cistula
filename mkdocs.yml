@@ -20,6 +20,8 @@ edit_uri: blob/main/docs/
 copyright: Copyright &copy; 2026 Lusoris, EUPL-1.2
 
 docs_dir: docs
+exclude_docs: |
+  adr/0001-release-job.md
 site_dir: site
 
 validation:
@@ -93,5 +95,5 @@ nav:
   - Decision records:
       - Index: adr/README.md
       - Template: adr/0000-template.md
-      - Release job: adr/0001-release-job.md
+      - Release job: adr/0003-release-job.md
       - Grouped flush: adr/0002-grouped-flush.md
