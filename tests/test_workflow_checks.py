@@ -597,3 +597,56 @@ def test_pages_deploy_follows_and_requires_the_head_check() -> None:
     assert head < deploy
     assert "        id: head" in job[head + 1 : deploy]
     assert job[deploy + 1] == "        if: steps.head.outputs.current == 'true'"
+
+
+def pages_push_problems(lines: list[str]) -> list[str]:
+    """Find problems in the Pages push trigger."""
+    start = lines.index("on:")
+    push = None
+    for number in range(start + 1, len(lines)):
+        line = lines[number]
+        if line.strip() and not line.lstrip().startswith("#") and _indent(line) == 0:
+            break
+        if line == "  push:":
+            push = number
+            break
+    if push is None:
+        message = "no push trigger in on block"
+        raise ValueError(message)
+    block = []
+    for line in lines[push + 1 :]:
+        if line.strip() and not line.lstrip().startswith("#") and _indent(line) <= 2:
+            break
+        block.append(line.strip())
+    problems = []
+    if any(line.startswith(("paths:", "paths-ignore:")) for line in block):
+        problems.append("push trigger must not filter paths")
+    if "branches: [main]" not in block:
+        problems.append("push trigger must name the main branch")
+    return problems
+
+
+def test_pages_push_builds_every_change() -> None:
+    """Every push to main starts a Pages build."""
+    assert pages_push_problems(workflow_lines("pages.yml")) == []
+
+
+@pytest.mark.parametrize("key", ["paths:", "paths-ignore:"])
+def test_pages_push_refuses_a_path_filter(key: str) -> None:
+    """A path filter is refused on the push trigger."""
+    lines = workflow_lines("pages.yml")
+    position = lines.index("    branches: [main]") + 1
+    lines[position:position] = [f"    {key}", '      - "docs/**"']
+    assert pages_push_problems(lines)
+
+
+def test_pages_push_needs_the_main_branch() -> None:
+    """The push trigger must name the main branch."""
+    lines = [line for line in workflow_lines("pages.yml") if line != "    branches: [main]"]
+    assert pages_push_problems(lines)
+
+
+def test_pages_push_needs_a_push_trigger() -> None:
+    """A missing push trigger is refused."""
+    with pytest.raises(ValueError, match="no push trigger in on block"):
+        pages_push_problems(["on:", "  workflow_dispatch:", "jobs:"])
