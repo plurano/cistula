@@ -111,7 +111,7 @@ verify: fetch verify-static verify-codacy verify-scanners package verify-package
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory verify-python PYTHON="$$python"; \
 	done
-	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Codacy exclusions, Python versions, semgrep and trivy scans, package, its size as the README states it, the durable-write figures the README states, same bytes from a second build, a consumer install by hash, and its tests on $(PYTHONS).'
+	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Codacy exclusions, Python versions, semgrep and trivy scans, package, its size as the development page states it, the durable-write figures the guarantees page states, same bytes from a second build, a consumer install by hash, and its tests on $(PYTHONS).'
 
 fetch:
 	@set -e; for python in $(PYTHONS); do \
@@ -186,12 +186,12 @@ package: environment
 	umask 022 && '$(ENV)/bin/python' -m build --wheel --no-isolation --outdir '$(DIST)' '$(DIST)'/*.tar.gz
 	sha256sum '$(DIST)'/*
 
-# The size of the package, which the README states, is measured: a figure
+# The size of the package, which docs/development.md states, is measured: a figure
 # that is off by more than a tenth fails, so the sentence is kept current.
 verify-package-size: environment
-	'$(ENV)/bin/python' tools/check_package_size.py README.md '$(DIST)'
+	'$(ENV)/bin/python' tools/check_package_size.py docs/development.md '$(DIST)'
 
-# The cost of a durable write, which the README states per file system, is
+# The cost of a durable write, which docs/guarantees.md states per file system, is
 # measured here: on a disk, a default write that costs less than 4 times one
 # without the flushes did not reach the disk, and a figure off by more than a
 # factor of 4 for the file system measured is out of date
@@ -199,7 +199,7 @@ verify-package-size: environment
 verify-durable-figures: environment
 	rm -rf build/durable && mkdir -p build/durable
 	PYTHONPATH=src '$(ENV)/bin/python' tools/measure_durable_write.py build/durable 50 > build/durable.tsv
-	'$(ENV)/bin/python' tools/check_durable_figures.py README.md build/durable.tsv
+	'$(ENV)/bin/python' tools/check_durable_figures.py docs/guarantees.md build/durable.tsv
 
 # The same commit gives the same bytes: every interpreter builds the package
 # once more, later and under another file mode mask of the caller, and a
@@ -230,12 +230,18 @@ verify-python: environment
 # Regenerates the locks from requirements/*.in. A release younger than three
 # days is not eligible. The age is written as a duration, so the command in
 # the lock header, which Renovate replays to recompile a lock, stays valid.
+# The documentation site builds on one interpreter, the one
+# .github/workflows/pages.yml sets up, and pymdown-extensions needs 3.11.5
+# or newer, so docs.txt is compiled for that interpreter.
 lock:
 	cd requirements && for lock in dev semgrep; do \
 		uv pip compile --universal --generate-hashes --python-version=3.11 \
 			--exclude-newer=P3D \
 			$$lock.in --output-file=$$lock.txt || exit 1; \
 	done
+	cd requirements && uv pip compile --universal --generate-hashes --python-version=3.14 \
+		--exclude-newer=P3D \
+		docs.in --output-file=docs.txt
 
 clean:
 	rm -rf .venv dist build src/*.egg-info .mypy_cache .ruff_cache .pytest_cache

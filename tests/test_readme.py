@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
 # SPDX-License-Identifier: EUPL-1.2
-"""Run the usage examples of the README against the installed package.
+"""Run the usage examples of the README and the documentation against the installed package.
 
-Each Python block of the README runs here as written. A renamed function or
+Each Python block of the pages in PAGES runs here as written. A renamed function or
 argument then fails a test instead of leaving the first thing a new user
 copies wrong.
 """
@@ -27,14 +27,18 @@ if TYPE_CHECKING:
     import pytest
 
 FENCE = "```"
+# The pages whose Python blocks a reader copies, in the order they are read.
+PAGES = ("README.md", os.path.join("docs", "guarantees.md"))
 # The first example runs git; without it the test fails, it is not skipped.
 GIT = shutil.which("git")
 
 
 def python_blocks() -> list[str]:
-    """Return the Python blocks of the README in their order, indentation removed."""
-    with open(os.path.join(REPOSITORY, "README.md"), encoding="utf-8") as file:
-        lines = file.read().splitlines(keepends=True)
+    """Return the Python blocks of PAGES in their order, indentation removed."""
+    lines: list[str] = []
+    for page in PAGES:
+        with open(os.path.join(REPOSITORY, page), encoding="utf-8") as file:
+            lines.extend(file.read().splitlines(keepends=True))
     blocks: list[str] = []
     current: list[str] | None = None
     for line in lines:
@@ -47,7 +51,7 @@ def python_blocks() -> list[str]:
             current = None
         else:
             current.append(line)
-    assert current is None, "a Python block of the README is not closed"
+    assert current is None, "a Python block of the pages is not closed"
     return blocks
 
 
@@ -74,7 +78,7 @@ def git(directory: Path, *arguments: str) -> str:
     return done.stdout.strip()
 
 
-def test_the_readme_holds_the_examples_this_file_runs() -> None:
+def test_the_pages_hold_the_examples_this_file_runs() -> None:
     # A new example fails here until a test below runs it.
     blocks = python_blocks()
 

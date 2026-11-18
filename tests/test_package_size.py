@@ -76,8 +76,8 @@ def test_stated_refuses_anything_but_one_sentence(text: str, found: int) -> None
         size.stated(text)
 
 
-def test_the_readme_of_the_repository_states_the_size_once() -> None:
-    with open(os.path.join(REPOSITORY, "README.md"), encoding="utf-8") as file:
+def test_the_development_page_states_the_size_once() -> None:
+    with open(os.path.join(REPOSITORY, "docs", "development.md"), encoding="utf-8") as file:
         assert set(size.stated(file.read())) == set(size.KEYS)
 
 
@@ -110,8 +110,8 @@ def test_measure_refuses_a_directory_without_exactly_one_file_of_each(tmp_path: 
     [
         (90000, []),
         (110000, []),
-        (89999, ["wheel: README states 89 kB, measured 100000 bytes (100 kB)"]),
-        (110001, ["wheel: README states 110 kB, measured 100000 bytes (100 kB)"]),
+        (89999, ["wheel: the page states 89 kB, measured 100000 bytes (100 kB)"]),
+        (110001, ["wheel: the page states 110 kB, measured 100000 bytes (100 kB)"]),
     ],
 )
 def test_compare_allows_a_tenth_of_the_measured_size_and_no_more(figure: int, problems: list[str]) -> None:
@@ -125,73 +125,73 @@ def test_compare_names_every_figure_that_is_off() -> None:
 
     problems = size.compare(dict.fromkeys(size.KEYS, 46000), measured)
 
-    assert problems == [f"{key}: README states 46 kB, measured 64499 bytes (64 kB)" for key in size.KEYS]
+    assert problems == [f"{key}: the page states 46 kB, measured 64499 bytes (64 kB)" for key in size.KEYS]
 
 
 def test_main_passes_a_current_sentence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     dist = build(tmp_path / "dist")
     measured = size.measure(str(dist))
-    readme = tmp_path / "README.md"
-    readme.write_text(sentence(rounded(measured)), encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(sentence(rounded(measured)), encoding="utf-8")
 
-    assert size.main([str(readme), str(dist)]) == 0
+    assert size.main([str(page), str(dist)]) == 0
     out, err = capsys.readouterr()
-    assert out.splitlines()[-1] == f"PASS: the package size in {readme} is within a tenth of the measured size."
-    assert out.count(" bytes, README ") == 4
+    assert out.splitlines()[-1] == f"PASS: the package size in {page} is within a tenth of the measured size."
+    assert out.count(" bytes, page ") == 4
     assert err == ""
 
 
 def test_main_fails_a_sentence_that_is_out_of_date(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     dist = build(tmp_path / "dist")
     figures = rounded(size.measure(str(dist)))
-    readme = tmp_path / "README.md"
-    readme.write_text(sentence({**figures, "wheel": figures["wheel"] * 2}), encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(sentence({**figures, "wheel": figures["wheel"] * 2}), encoding="utf-8")
 
-    assert size.main([str(readme), str(dist)]) == 1
+    assert size.main([str(page), str(dist)]) == 1
     out, err = capsys.readouterr()
     assert out == ""
     lines = err.splitlines()
-    assert lines[0] == f"FAIL: the package size in {readme} is out of date:"
+    assert lines[0] == f"FAIL: the package size in {page} is out of date:"
     assert len(lines) == 3
-    assert lines[1].startswith("  wheel: README states ")
+    assert lines[1].startswith("  wheel: the page states ")
     assert lines[2] == "Update the sentence to the measured sizes."
 
 
-def test_main_fails_a_readme_without_the_sentence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_fails_a_page_without_the_sentence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     dist = build(tmp_path / "dist")
-    readme = tmp_path / "README.md"
-    readme.write_text("No size here.\n", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text("No size here.\n", encoding="utf-8")
 
-    assert size.main([str(readme), str(dist)]) == 1
+    assert size.main([str(page), str(dist)]) == 1
     assert capsys.readouterr().err == (
         "FAIL: expected one sentence 'about N kB and N kB instead of N kB and N kB', found 0\n"
     )
 
 
-@pytest.mark.parametrize("argv", [[], ["README.md"], ["README.md", "dist", "more"]])
+@pytest.mark.parametrize("argv", [[], ["page.md"], ["page.md", "dist", "more"]])
 def test_main_refuses_a_wrong_argument_count(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
     assert size.main(argv) == 2
-    assert capsys.readouterr().err == "usage: check_package_size.py README DIRECTORY\n"
+    assert capsys.readouterr().err == "usage: check_package_size.py PAGE DIRECTORY\n"
 
 
 @pytest.mark.parametrize("damaged", ["pkg-1.tar.gz", "pkg-1-py3-none-any.whl"])
 def test_main_reports_a_damaged_build(tmp_path: Path, capsys: pytest.CaptureFixture[str], damaged: str) -> None:
     dist = build(tmp_path / "dist")
     (dist / damaged).write_bytes((dist / damaged).read_bytes()[:100])
-    readme = tmp_path / "README.md"
-    readme.write_text(sentence(dict.fromkeys(size.KEYS, 1000)), encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(sentence(dict.fromkeys(size.KEYS, 1000)), encoding="utf-8")
 
-    assert size.main([str(readme), str(dist)]) == 2
+    assert size.main([str(page), str(dist)]) == 2
     assert capsys.readouterr().err.startswith(f"could not measure the build in {dist}: ")
 
 
 def test_the_script_runs_as_the_gate_calls_it(tmp_path: Path) -> None:
     dist = build(tmp_path / "dist")
-    readme = tmp_path / "README.md"
-    readme.write_text(sentence(dict.fromkeys(size.KEYS, 999000)), encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(sentence(dict.fromkeys(size.KEYS, 999000)), encoding="utf-8")
 
     done = subprocess.run(
-        [sys.executable, "-I", script("check_package_size"), str(readme), str(dist)],
+        [sys.executable, "-I", script("check_package_size"), str(page), str(dist)],
         capture_output=True,
         text=True,
         timeout=60,
@@ -200,4 +200,4 @@ def test_the_script_runs_as_the_gate_calls_it(tmp_path: Path) -> None:
 
     assert done.returncode == 1
     assert done.stdout == ""
-    assert done.stderr.startswith(f"FAIL: the package size in {readme} is out of date:\n")
+    assert done.stderr.startswith(f"FAIL: the package size in {page} is out of date:\n")

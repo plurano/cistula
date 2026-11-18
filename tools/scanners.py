@@ -47,7 +47,7 @@ TRIVY_DB_DIGEST = "sha256:44b3f4dfbfe98b280b725f6e4ec7ada9b13774aefbad553a19afc4
 
 # The pip analyzer reads only files named requirements.txt by default; the
 # locks of this repository have other names.
-LOCKS = ("requirements/dev.txt", "requirements/semgrep.txt")
+LOCKS = ("requirements/dev.txt", "requirements/docs.txt", "requirements/semgrep.txt")
 LOCK_PATTERN = r"pip:^requirements/[a-z]+\.txt$"
 PLANTED_LOCK = "requests==2.19.1\n"
 EXPECTED_CVE = "CVE-2018-18074"

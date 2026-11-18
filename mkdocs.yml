@@ -1,0 +1,97 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+---
+# The documentation site of the package, published to GitHub Pages by
+# .github/workflows/pages.yml. It publishes the pages under docs/ and nothing
+# else; the README stays the front page on the forge and on PyPI. Build from
+# the repository root:
+#
+#   python -m mkdocs build --strict
+
+site_name: Cistula
+site_url: https://plurano.github.io/cistula/
+site_description: >-
+  Shared Python helpers of the Plurano framework family: commands under a time
+  limit, strict JSON, files replaced in one step and SHA-256 digests.
+site_author: Lusoris
+repo_url: https://github.com/plurano/cistula
+repo_name: plurano/cistula
+edit_uri: blob/main/docs/
+copyright: Copyright &copy; 2026 Lusoris, EUPL-1.2
+
+docs_dir: docs
+site_dir: site
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+theme:
+  name: material
+  language: en
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - scheme: default
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.action.edit
+    - content.code.copy
+    - toc.follow
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/plurano/cistula
+      name: Cistula on GitHub
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/cistula/
+      name: Cistula on PyPI
+
+nav:
+  - Home: index.md
+  - Guarantees: guarantees.md
+  - Limits: limits.md
+  - Compared with other libraries: comparison.md
+  - Development: development.md
+  - Decision records:
+      - Index: adr/README.md
+      - Template: adr/0000-template.md
+      - Release job: adr/0001-release-job.md
+      - Grouped flush: adr/0002-grouped-flush.md
