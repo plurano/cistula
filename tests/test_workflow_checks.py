@@ -448,6 +448,31 @@ def test_environment_whose_interpreter_resolves_is_kept(tmp_path: Path, target: 
     assert "-m venv" not in result.stdout
 
 
+def test_a_cold_fetch_builds_each_environment_once(tmp_path: Path) -> None:
+    requirements = tmp_path / "work" / "requirements"
+    requirements.mkdir(parents=True)
+    for name in ("dev.txt", "semgrep.txt"):
+        (requirements / name).write_text("# lock\n", encoding="utf-8")
+    stub = tmp_path / "bin" / "cistula-stub-python"
+    stub.parent.mkdir()
+    script = (
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        "if sys.argv[1:3] == ['-m', 'venv']:\n"
+        "    real = os.path.realpath(sys.argv[0])\n"
+        "    os.makedirs(os.path.join(sys.argv[3], 'bin'), exist_ok=True)\n"
+        "    os.symlink(real, os.path.join(sys.argv[3], 'bin', 'python'))\n"
+        "    with open(os.path.join(os.path.dirname(real), 'venv.log'), 'a', encoding='utf-8') as handle:\n"
+        "        handle.write(sys.argv[3] + '\\n')\n"
+    )
+    stub.write_text(script, encoding="utf-8")
+    stub.chmod(0o700)
+    result = run_make(tmp_path, "fetch", "environment", f"PYTHON={stub}", f"PYTHONS={stub}")
+    assert result.returncode == 0, result.stderr
+    log = (tmp_path / "bin" / "venv.log").read_text(encoding="utf-8").splitlines()
+    assert sorted(log) == [".venv/cistula-stub-python", ".venv/semgrep"]
+
+
 def _on_block(lines: list[str]) -> list[str]:
     """Return the lines of the `on:` block: up to the next line that starts without indentation."""
     # YAML 1.1 reads a bare `on` as true, so a generated workflow quotes the key.

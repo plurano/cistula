@@ -106,14 +106,17 @@ verify-codacy:
 
 # This repository's own checks; they need no engine. `fetch` is the only step
 # that reaches the network (the package index, and ghcr.io for the trivy
-# database); everything after it runs offline.
+# database); everything after it runs offline. The stamps decide when the
+# Makefile is read whether a venv's interpreter resolves, so `fetch` builds
+# the first environments in this make, not only in a child, or a later
+# prerequisite would build them again.
 verify: fetch verify-static verify-codacy verify-scanners package verify-package-size verify-durable-figures verify-reproducible
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory verify-python PYTHON="$$python"; \
 	done
 	@printf '%s\n' 'PASS: format, lint, types, licence headers, exception list, Codacy exclusions, Python versions, semgrep and trivy scans, package, its size as the README states it, the durable-write figures the README states, same bytes from a second build, a consumer install by hash, and its tests on $(PYTHONS).'
 
-fetch:
+fetch: environment semgrep-environment
 	@set -e; for python in $(PYTHONS); do \
 		$(MAKE) --no-print-directory environment PYTHON="$$python"; \
 	done
