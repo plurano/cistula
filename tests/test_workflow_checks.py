@@ -37,6 +37,7 @@ TAG_CHECK = ("release-build.yml", "Read the version and check the tag")
 PACKAGE_PICK = ("release.yml", "Pick the two package files")
 ENGINE_BUILD = ("ci.yml", "Build pinned praetorctl from the published Praetor commit")
 ENGINE_PIN_TEST = 'rev-parse HEAD)" = "$PRAETOR_REF"'
+PAGES_HEAD = ("pages.yml", "Stop when main has moved on")
 
 TRAILER = "\n\nSigned-off-by: Tester <tester@example.com>"
 
@@ -514,3 +515,81 @@ def test_required_check_refuses_a_workflow_without_merge_group() -> None:
     lines = [line for line in workflow_lines("reuse.yml") if line.strip() != "merge_group:"]
     with pytest.raises(AssertionError, match="but not in a merge queue"):
         assert_required_checks(["Licence / REUSE lint"], {"reuse.yml": lines}, callee_job_names())
+
+
+def pages_head(tmp_path: Path, sha: str, remote: str) -> subprocess.CompletedProcess[str]:
+    """Run the Pages head check with a stubbed remote response."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (tmp_path / "work").mkdir()
+    stub = bin_dir / "git"
+    stub.write_text(
+        f"#!/bin/sh\nprintf '%s\\n' \"$*\" > '{tmp_path / 'arguments'}'\nprintf '%s' '{remote}'\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    (tmp_path / "output").touch()
+    return shell(
+        run_block(*PAGES_HEAD),
+        tmp_path,
+        PATH=f"{bin_dir}{os.pathsep}{ENV['PATH']}",
+        REPO="plurano/cistula",
+        SHA=sha,
+        GITHUB_OUTPUT=str(tmp_path / "output"),
+    )
+
+
+def test_pages_head_admits_the_current_commit(tmp_path: Path) -> None:
+    """The current main commit is admitted for deployment."""
+    sha = "a" * 40
+    result = pages_head(tmp_path, sha, f"{sha}\trefs/heads/main\n")
+    assert result.returncode == 0
+    assert (tmp_path / "output").read_text(encoding="utf-8") == "current=true\n"
+    assert (tmp_path / "arguments").read_text(encoding="utf-8") == (
+        "ls-remote https://github.com/plurano/cistula.git refs/heads/main\n"
+    )
+
+
+def test_pages_head_skips_an_old_commit(tmp_path: Path) -> None:
+    """An old commit is skipped with a notice."""
+    result = pages_head(tmp_path, "a" * 40, f"{'b' * 40}\trefs/heads/main\n")
+    assert result.returncode == 0
+    assert (tmp_path / "output").read_text(encoding="utf-8") == "current=false\n"
+    assert any(line.startswith("::notice::") for line in result.stdout.splitlines())
+
+
+def test_pages_head_refuses_an_empty_response(tmp_path: Path) -> None:
+    """An empty remote response fails without declaring a current commit."""
+    result = pages_head(tmp_path, "a" * 40, "")
+    assert result.returncode != 0
+    assert "::error::Could not read the head of main" in result.stdout
+    assert not any(line.startswith("current=") for line in (tmp_path / "output").read_text(encoding="utf-8").splitlines())
+
+
+def test_pages_head_refuses_a_sha_prefix(tmp_path: Path) -> None:
+    """A commit prefix does not match the full remote head."""
+    sha = "a" * 39
+    result = pages_head(tmp_path, sha, f"{sha}b\trefs/heads/main\n")
+    assert result.returncode == 0
+    assert (tmp_path / "output").read_text(encoding="utf-8") == "current=false\n"
+
+
+def test_pages_head_accepts_a_space_separator(tmp_path: Path) -> None:
+    """A space separates the remote head from its reference."""
+    sha = "a" * 40
+    result = pages_head(tmp_path, sha, f"{sha} refs/heads/main\n")
+    assert result.returncode == 0
+    assert (tmp_path / "output").read_text(encoding="utf-8") == "current=true\n"
+
+
+def test_pages_deploy_follows_and_requires_the_head_check() -> None:
+    """The deploy job runs the head check before its guarded deploy step."""
+    lines = workflow_lines("pages.yml")
+    start = lines.index("  deploy:")
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("  ") and _indent(lines[i]) == 2), len(lines))
+    job = lines[start:end]
+    head = job.index("      - name: Stop when main has moved on")
+    deploy = job.index("      - name: Deploy")
+    assert head < deploy
+    assert "        id: head" in job[head + 1 : deploy]
+    assert job[deploy + 1] == "        if: steps.head.outputs.current == 'true'"
