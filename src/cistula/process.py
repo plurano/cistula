@@ -55,8 +55,10 @@ class Result:
 
     `returncode` is the exit status; a negative value `-N` means the child was
     ended by signal `N`. `timed_out` is true when the time limit expired and
-    the process group was stopped; the output collected until then is kept.
-    `duration` is the wall-clock time of the call in seconds.
+    the process group was signalled as `run` describes; the output collected
+    until then is kept. A group member that ignores `SIGTERM` and writes its
+    output elsewhere can outlive the call. `duration` is the wall-clock time
+    of the call in seconds.
     """
 
     argv: tuple[str, ...]
@@ -163,7 +165,12 @@ def _signal_group(group: int, number: signal.Signals) -> None:
 
 
 def _stop_group(child: subprocess.Popen[bytes], kill_after: float) -> tuple[bytes | None, bytes | None]:
-    """Stop the child's process group and return the output collected so far."""
+    """Signal the child's process group and return the output collected so far.
+
+    `SIGTERM` goes first; `SIGKILL` follows only while the child still runs or
+    a group member still holds its output pipes open, so a member that ignores
+    `SIGTERM` and writes its output elsewhere can outlive the call.
+    """
     out: bytes | None = None
     err: bytes | None = None
     _signal_group(child.pid, signal.SIGTERM)
