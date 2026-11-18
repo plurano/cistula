@@ -27,7 +27,7 @@ Adopted check = coverage state + catalog path; else audit scanner; else `unknown
 | **HISS-05** scoping | declare every identifier in smallest lexical scope serving it | unknown | advisory |
 | **HISS-06** concurrency | explicit scalar upper bound on every worker pool + concurrent fan-out | unknown | advisory |
 | **HISS-07** errors | every error handled or wrapped with context | `praetorctl audit` HISS scan: partial in Go, Rust, Python | advisory |
-| **HISS-08** determinism | zero dynamic code execution (`eval` / `exec`); a process signal's target is bounded above 1 (`killpg`, `kill(-pid)`, Go `syscall.Kill`) | `praetorctl audit` HISS scan: C banned calls, Python `eval` / `exec`, Go `syscall.Kill` / `unix.Kill` | advisory |
+| **HISS-08** determinism | zero dynamic code execution (`eval` / `exec`); a process signal's target is greater than 1 and never caller's own pid or group (`killpg`, `kill(-pid)`, Go `syscall.Kill`) | `praetorctl audit` HISS scan: C banned calls, Python `eval` / `exec`, Go `syscall.Kill` / `unix.Kill` | advisory |
 | **HISS-09** reference safety | n/a: no such construct in repository languages; advisory | unknown | advisory |
 | **HISS-10** warnings | zero warnings: compiler, linter, format sweeps | unknown | advisory |
 | **HISS-11** supply chain | pinned lockfiles; zero floating tags; signed provenance | unknown | advisory |
