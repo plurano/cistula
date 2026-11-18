@@ -99,11 +99,15 @@ SPDX-License-Identifier: EUPL-1.2
 - **Strict JSON.** A repeated key, a byte-order mark and invalid UTF-8 are
   errors when reading. So are `NaN`, the two infinities and a floating-point
   literal (a number with a fraction or an exponent) that overflows a float:
-  `json.loads` reads them silently, the readers raise `ValueError`. An integer
-  of any size is read as a Python `int` and `write_json` writes it;
-  `write_json` refuses non-finite floats (`nan`, `inf` and `-inf`) and leaves
-  the old file whole. A caller that must read a file holding such a number
-  passes `finite_numbers=False`; that lifts this one check and no other, as
-  `unique_keys=False` does for a repeated key
+  `json.loads` reads them silently, the readers raise `ValueError`. A caller
+  that must read a file holding such a number passes `finite_numbers=False`;
+  that lifts this one check and no other, as `unique_keys=False` does for a
+  repeated key. An integer is read as a Python `int` and `write_json` writes
+  it up to the interpreter's limit on integer-string conversion
+  (`sys.get_int_max_str_digits()`, 4300 digits unless changed); a longer
+  integer raises `ValueError` when read, whatever the keywords. `write_json`
+  raises `ValueError` for such an `int` and for non-finite floats (`nan`, `inf`
+  and `-inf`) and leaves the old file whole
   ([tests/test_files.py](https://github.com/plurano/cistula/blob/main/tests/test_files.py),
+  `test_an_integer_is_read_and_written_up_to_the_conversion_limit`,
   `test_each_keyword_lifts_its_own_check_only`).

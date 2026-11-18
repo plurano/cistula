@@ -43,6 +43,10 @@ NO_QUEUE = "deploy job must queue its runs with queue: max"
 CANCELS = "deploy job must not cancel a run in progress"
 # The only workflow-level group accepted; one group per pull request, one per run otherwise.
 RUN_GROUP = "pages-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}"
+# The one group every deploy waits in.
+DEPLOY_GROUP = "pages-deploy"
+# Problem reported when the deploy job does not wait in DEPLOY_GROUP.
+SPLIT_QUEUE = "deploy job must wait in the one group pages-deploy"
 
 TRAILER = "\n\nSigned-off-by: Tester <tester@example.com>"
 
@@ -679,13 +683,15 @@ def pages_concurrency_problems(lines: list[str]) -> list[str]:
     """Find concurrency that lets one Pages run replace the pending deploy of another."""
     problems: list[str] = []
     workflow = pages_mapping(lines, "concurrency:")
-    if workflow and workflow.get("group", "") != RUN_GROUP:
+    if workflow.get("group", "") != RUN_GROUP:
         problems.append(SHARED_GROUP)
     start = lines.index("  deploy:")
     end = next(
         (i for i in range(start + 1, len(lines)) if lines[i].startswith("  ") and _indent(lines[i]) == 2), len(lines)
     )
     deploy = pages_mapping(lines[start:end], "    concurrency:")
+    if deploy.get("group") != DEPLOY_GROUP:
+        problems.append(SPLIT_QUEUE)
     if deploy.get("queue") != "max":
         problems.append(NO_QUEUE)
     if deploy.get("cancel-in-progress", "false") != "false":
@@ -719,22 +725,64 @@ def test_pages_concurrency_refuses_a_reversed_group() -> None:
     assert pages_concurrency_problems(lines) == [SHARED_GROUP]
 
 
+def test_pages_concurrency_refuses_a_scalar_group() -> None:
+    """A scalar workflow group shared by main pushes is refused."""
+    committed = workflow_lines("pages.yml")
+    removed = ["concurrency:", "  group: " + RUN_GROUP]
+    start = committed.index(removed[0])
+    assert committed[start : start + len(removed)] == removed
+    lines = [
+        "concurrency: pages-${{ github.ref }}" if line == "concurrency:" else line
+        for line in committed
+        if line != "  group: " + RUN_GROUP
+    ]
+    assert lines != committed
+    assert pages_concurrency_problems(lines) == [SHARED_GROUP]
+
+
+def test_pages_concurrency_refuses_a_missing_workflow_block() -> None:
+    """A workflow without its concurrency block is refused."""
+    committed = workflow_lines("pages.yml")
+    removed = [
+        "concurrency:",
+        "  group: " + RUN_GROUP,
+        "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+    ]
+    start = committed.index(removed[0])
+    assert committed[start : start + len(removed)] == removed
+    lines = [line for line in committed if line not in removed]
+    assert lines != committed
+    assert pages_concurrency_problems(lines) == [SHARED_GROUP]
+
+
+def test_pages_concurrency_refuses_a_deploy_group_per_run() -> None:
+    """A deploy group of its own per run is refused."""
+    committed = workflow_lines("pages.yml")
+    lines = [
+        "      group: pages-${{ github.run_id }}" if line == "      group: pages-deploy" else line for line in committed
+    ]
+    assert lines != committed
+    assert pages_concurrency_problems(lines) == [SPLIT_QUEUE]
+
+
 @pytest.mark.parametrize(
-    ("removed", "replacement"),
+    ("removed", "replacement", "expected"),
     [
-        (["      queue: max"], []),
-        (["      queue: max"], ["      queue: single"]),
-        (["    concurrency:", "      group: pages-deploy", "      queue: max"], []),
+        (["      queue: max"], [], [NO_QUEUE]),
+        (["      queue: max"], ["      queue: single"], [NO_QUEUE]),
+        (["    concurrency:", "      group: pages-deploy", "      queue: max"], [], [SPLIT_QUEUE, NO_QUEUE]),
     ],
 )
-def test_pages_concurrency_refuses_a_replacing_deploy(removed: list[str], replacement: list[str]) -> None:
+def test_pages_concurrency_refuses_a_replacing_deploy(
+    removed: list[str], replacement: list[str], expected: list[str]
+) -> None:
     """A deploy job that does not queue runs with queue: max is refused."""
     committed = workflow_lines("pages.yml")
     start = committed.index(removed[0])
     assert committed[start : start + len(removed)] == removed
     lines = committed[:start] + replacement + committed[start + len(removed) :]
     assert lines != committed
-    assert pages_concurrency_problems(lines) == [NO_QUEUE]
+    assert pages_concurrency_problems(lines) == expected
 
 
 def test_pages_concurrency_refuses_a_cancelling_deploy() -> None:
