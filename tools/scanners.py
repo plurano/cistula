@@ -43,7 +43,7 @@ SCAN_SECONDS = 600
 FETCH_SECONDS = 600
 
 TRIVY_DB_REPOSITORY = "ghcr.io/aquasecurity/trivy-db"
-TRIVY_DB_DIGEST = "sha256:44b3f4dfbfe98b280b725f6e4ec7ada9b13774aefbad553a19afc4b919c6a281"
+TRIVY_DB_DIGEST = "sha256:1b05677e44b5562e39d201114b54dcc72a31c71687756c3d7a69f2e26044dc8e"
 
 # The pip analyzer reads only files named requirements.txt by default; the
 # locks of this repository have other names.
