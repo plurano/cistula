@@ -90,7 +90,11 @@ jobs:
     # Deploys wait in first-in-first-out order and none replaces another, so a
     # run that reaches the queue late cannot cancel the pending run of the
     # current main commit; "Stop when main has moved on" then skips every run
-    # whose commit is no longer the head of main.
+    # whose commit is no longer the head of main. The group runs one job at
+    # a time, from head check through deployment, so a commit that lands after
+    # the check queues behind this job and the newest main commit deploys last.
+    # Once 100 deploys are waiting, GitHub cancels new arrivals, but a manual
+    # run on main (workflow_dispatch) deploys the current head.
     concurrency:
       group: pages-deploy
       queue: max
@@ -114,7 +118,10 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
         run: |
-          remote=$(timeout 60 git ls-remote "https://github.com/${REPO}.git" refs/heads/main)
+          if ! remote=$(timeout 60 git ls-remote "https://github.com/${REPO}.git" refs/heads/main); then
+            echo "::error::Could not read the head of main"
+            exit 1
+          fi
           head=${remote%%[[:space:]]*}
           if [[ -z "$head" ]]; then
             echo "::error::Could not read the head of main"

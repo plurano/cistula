@@ -526,14 +526,14 @@ def test_required_check_refuses_a_workflow_without_merge_group() -> None:
         assert_required_checks(["Licence / REUSE lint"], {"reuse.yml": lines}, callee_job_names())
 
 
-def pages_head(tmp_path: Path, sha: str, remote: str) -> subprocess.CompletedProcess[str]:
+def pages_head(tmp_path: Path, sha: str, remote: str, status: int = 0) -> subprocess.CompletedProcess[str]:
     """Run the Pages head check with a stubbed remote response."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (tmp_path / "work").mkdir()
     stub = bin_dir / "git"
     stub.write_text(
-        f"#!/bin/sh\nprintf '%s\\n' \"$*\" > '{tmp_path / 'arguments'}'\nprintf '%s' '{remote}'\n",
+        f"#!/bin/sh\nprintf '%s\\n' \"$*\" > '{tmp_path / 'arguments'}'\nprintf '%s' '{remote}'\nexit {status}\n",
         encoding="utf-8",
     )
     stub.chmod(0o755)
@@ -577,10 +577,27 @@ def test_pages_head_refuses_an_empty_response(tmp_path: Path) -> None:
     )
 
 
+def test_pages_head_reports_a_timed_out_lookup(tmp_path: Path) -> None:
+    sha = "a" * 40
+    result = pages_head(tmp_path, sha, f"{sha}\trefs/heads/main\n", status=124)
+    assert result.returncode != 0
+    assert "::error::Could not read the head of main" in result.stdout
+    assert not any(
+        line.startswith("current=") for line in (tmp_path / "output").read_text(encoding="utf-8").splitlines()
+    )
+
+
 def test_pages_head_refuses_a_sha_prefix(tmp_path: Path) -> None:
     """A commit prefix does not match the full remote head."""
     sha = "a" * 39
     result = pages_head(tmp_path, sha, f"{sha}b\trefs/heads/main\n")
+    assert result.returncode == 0
+    assert (tmp_path / "output").read_text(encoding="utf-8") == "current=false\n"
+
+
+def test_pages_head_refuses_a_remote_sha_prefix(tmp_path: Path) -> None:
+    sha = "a" * 40
+    result = pages_head(tmp_path, sha, f"{sha[:39]}\trefs/heads/main\n")
     assert result.returncode == 0
     assert (tmp_path / "output").read_text(encoding="utf-8") == "current=false\n"
 
@@ -593,19 +610,53 @@ def test_pages_head_accepts_a_space_separator(tmp_path: Path) -> None:
     assert (tmp_path / "output").read_text(encoding="utf-8") == "current=true\n"
 
 
+def pages_block(lines: list[str], header: str) -> list[str]:
+    """Return the indented contents of the job or step named by the header."""
+    body = []
+    for line in lines[lines.index(header) + 1 :]:
+        if line.strip() and not line.lstrip().startswith("#") and _indent(line) <= _indent(header):
+            break
+        body.append(line)
+    return body
+
+
+def pages_deploy_problems(lines: list[str]) -> list[str]:
+    job = pages_block(lines, "  deploy:")
+    head = f"      - name: {PAGES_HEAD[1]}"
+    deploy = "      - name: Deploy"
+    problems = []
+    if job.index(head) > job.index(deploy):
+        problems.append("head check must precede the deploy step")
+    if "        id: head" not in pages_block(job, head):
+        problems.append("head check must have id head")
+    if "        if: steps.head.outputs.current == 'true'" not in pages_block(job, deploy):
+        problems.append("deploy step must require the current head")
+    return problems
+
+
 def test_pages_deploy_follows_and_requires_the_head_check() -> None:
-    """The deploy job runs the head check before its guarded deploy step."""
+    assert pages_deploy_problems(workflow_lines("pages.yml")) == []
+
+
+def test_pages_deploy_refuses_a_missing_guard() -> None:
     lines = workflow_lines("pages.yml")
-    start = lines.index("  deploy:")
-    end = next(
-        (i for i in range(start + 1, len(lines)) if lines[i].startswith("  ") and _indent(lines[i]) == 2), len(lines)
-    )
-    job = lines[start:end]
-    head = job.index("      - name: Stop when main has moved on")
-    deploy = job.index("      - name: Deploy")
-    assert head < deploy
-    assert "        id: head" in job[head + 1 : deploy]
-    assert job[deploy + 1] == "        if: steps.head.outputs.current == 'true'"
+    lines.remove("        if: steps.head.outputs.current == 'true'")
+    assert pages_deploy_problems(lines) == ["deploy step must require the current head"]
+
+
+def test_pages_deploy_needs_the_head_output_id() -> None:
+    lines = workflow_lines("pages.yml")
+    lines.remove("        id: head")
+    assert pages_deploy_problems(lines) == ["head check must have id head"]
+
+
+def test_pages_deploy_refuses_a_late_head_check() -> None:
+    lines = workflow_lines("pages.yml")
+    head = lines.index(f"      - name: {PAGES_HEAD[1]}")
+    deploy = lines.index("      - name: Deploy")
+    end = deploy + 1 + len(pages_block(lines, lines[deploy]))
+    lines[head:end] = lines[deploy:end] + lines[head:deploy]
+    assert pages_deploy_problems(lines) == ["head check must precede the deploy step"]
 
 
 def pages_push_problems(lines: list[str]) -> list[str]:
@@ -628,7 +679,7 @@ def pages_push_problems(lines: list[str]) -> list[str]:
             break
         block.append(line.strip())
     problems = []
-    if any(line.startswith(("paths:", "paths-ignore:")) for line in block):
+    if any(re.match(r"""(["']?)paths(?:-ignore)?\1:""", line) for line in block):
         problems.append("push trigger must not filter paths")
     if "branches: [main]" not in block:
         problems.append("push trigger must name the main branch")
@@ -640,13 +691,15 @@ def test_pages_push_builds_every_change() -> None:
     assert pages_push_problems(workflow_lines("pages.yml")) == []
 
 
-@pytest.mark.parametrize("key", ["paths:", "paths-ignore:"])
+@pytest.mark.parametrize(
+    "key", ["paths:", "paths-ignore:", '"paths":', "'paths':", '"paths-ignore":', "'paths-ignore':"]
+)
 def test_pages_push_refuses_a_path_filter(key: str) -> None:
     """A path filter is refused on the push trigger."""
     lines = workflow_lines("pages.yml")
     position = lines.index("    branches: [main]") + 1
     lines[position:position] = [f"    {key}", '      - "docs/**"']
-    assert pages_push_problems(lines)
+    assert "push trigger must not filter paths" in pages_push_problems(lines)
 
 
 def test_pages_push_needs_the_main_branch() -> None:
@@ -685,11 +738,7 @@ def pages_concurrency_problems(lines: list[str]) -> list[str]:
     workflow = pages_mapping(lines, "concurrency:")
     if workflow.get("group", "") != RUN_GROUP:
         problems.append(SHARED_GROUP)
-    start = lines.index("  deploy:")
-    end = next(
-        (i for i in range(start + 1, len(lines)) if lines[i].startswith("  ") and _indent(lines[i]) == 2), len(lines)
-    )
-    deploy = pages_mapping(lines[start:end], "    concurrency:")
+    deploy = pages_mapping(pages_block(lines, "  deploy:"), "    concurrency:")
     if deploy.get("group") != DEPLOY_GROUP:
         problems.append(SPLIT_QUEUE)
     if deploy.get("queue") != "max":
@@ -728,14 +777,14 @@ def test_pages_concurrency_refuses_a_reversed_group() -> None:
 def test_pages_concurrency_refuses_a_scalar_group() -> None:
     """A scalar workflow group shared by main pushes is refused."""
     committed = workflow_lines("pages.yml")
-    removed = ["concurrency:", "  group: " + RUN_GROUP]
+    removed = [
+        "concurrency:",
+        "  group: " + RUN_GROUP,
+        "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+    ]
     start = committed.index(removed[0])
     assert committed[start : start + len(removed)] == removed
-    lines = [
-        "concurrency: pages-${{ github.ref }}" if line == "concurrency:" else line
-        for line in committed
-        if line != "  group: " + RUN_GROUP
-    ]
+    lines = [*committed[:start], "concurrency: pages-${{ github.ref }}", *committed[start + len(removed) :]]
     assert lines != committed
     assert pages_concurrency_problems(lines) == [SHARED_GROUP]
 
@@ -789,7 +838,7 @@ def test_pages_concurrency_refuses_a_cancelling_deploy() -> None:
     """A deploy job that cancels a run in progress is refused."""
     committed = workflow_lines("pages.yml")
     lines = list(committed)
-    position = lines.index("      queue: max") + 1
-    lines.insert(position, "      cancel-in-progress: true")
+    position = lines.index("      queue: max")
+    lines[position : position + 1] = ["      queue: single", "      cancel-in-progress: true"]
     assert lines != committed
-    assert pages_concurrency_problems(lines) == [CANCELS]
+    assert pages_concurrency_problems(lines) == [NO_QUEUE, CANCELS]
