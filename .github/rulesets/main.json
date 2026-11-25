@@ -54,6 +54,9 @@
             "context": "Verification gate"
           },
           {
+            "context": "Build documentation site"
+          },
+          {
             "context": "Licence / REUSE lint"
           }
         ],

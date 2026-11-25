@@ -6,7 +6,8 @@ The classifiers of `pyproject.toml` are the list of supported versions; the
 oldest is the floor. The gate runs the tests on the interpreters the Makefile
 names, CI and the release build install the interpreters their workflows
 (`ci.yml` and `release-build.yml`) name, the lint and the type check read the
-floor from their own settings, and the lock is compiled for the floor. This
+floor from their own settings, the package lock is compiled for the floor,
+and the documentation lock for the interpreter the Pages workflow sets up. This
 script fails the gate when one of these places disagrees with the
 classifiers, so a version cannot be declared as supported without being
 tested, and the floor cannot move in one place only.
@@ -23,14 +24,18 @@ PROJECT = "pyproject.toml"
 LINT_CONFIG = "ruff.toml"
 MAKEFILE = "Makefile"
 LOCK = "requirements/dev.txt"
+DOCS_LOCK = "requirements/docs.txt"
 WORKFLOW = ".github/workflows/ci.yml"
 RELEASE_WORKFLOW = ".github/workflows/release-build.yml"
+PAGES_WORKFLOW = ".github/workflows/pages.yml"
 
 _CLASSIFIER = re.compile(r"^Programming Language :: Python :: (3\.\d+)$")
 _FLOOR = re.compile(r"^>=(3\.\d+)$")
 _GATE_INTERPRETERS = re.compile(r"^PYTHONS \?=(.*)$", re.MULTILINE)
 _LOCK_TARGET = re.compile(r"--python-version=(\S+)")
 _WORKFLOW_LIST = re.compile(r"^ +python-version: \|\n((?: +\S+\n)+)", re.MULTILINE)
+_SETUP_PYTHON = re.compile(r"""uses:\s+["']?actions/setup-python@""")
+_PAGES_INTERPRETER = re.compile(r"""python-version:\s+(["']?)(3\.\d+)\1""")
 
 
 def _text(root: str, file: str) -> str:
@@ -78,17 +83,71 @@ def _workflow_interpreters(root: str, file: str = WORKFLOW) -> list[str]:
     return [line.strip() for block in _WORKFLOW_LIST.findall(_text(root, file)) for line in block.splitlines()]
 
 
+def _lock_interpreters(root: str) -> tuple[list[str], list[str]]:
+    """Return package and documentation compile command versions, respectively."""
+    package: list[str] = []
+    docs: list[str] = []
+    for line in _text(root, MAKEFILE).replace("\\\n", " ").splitlines():
+        if "uv pip compile" in line:
+            (docs if "docs.in" in line else package).extend(_LOCK_TARGET.findall(line))
+    return package, docs
+
+
+def _entries(lines: list[str]) -> list[list[str]]:
+    """Split a YAML block at its direct children, retaining each child's nested lines."""
+    if not lines:
+        return []
+    indent = len(lines[0]) - len(lines[0].lstrip())
+    entries: list[list[str]] = []
+    for line in lines:
+        if len(line) - len(line.lstrip()) == indent:
+            entries.append([])
+        entries[-1].append(line)
+    return entries
+
+
+def _mapping_value(lines: list[str], key: str) -> list[str]:
+    """Return the nested lines of a direct mapping key."""
+    return next((entry[1:] for entry in _entries(lines) if entry[0].strip() == key), [])
+
+
+def _setup_python_versions(step: list[str]) -> list[str]:
+    """Read the python-version inputs of one setup-python step."""
+    # Align the key following the list marker with the step's other keys.
+    fields = [step[0].replace("- ", "  ", 1), *step[1:]]
+    if not any(_SETUP_PYTHON.match(entry[0].strip()) for entry in _entries(fields)):
+        return []
+    inputs = _entries(_mapping_value(fields, "with:"))
+    return [match[2] for entry in inputs if (match := _PAGES_INTERPRETER.fullmatch(entry[0].strip()))]
+
+
+def _pages_interpreters(root: str) -> list[str]:
+    """Return the interpreter versions the Pages workflow sets up."""
+    lines = [line.partition(" #")[0].rstrip() for line in _text(root, PAGES_WORKFLOW).splitlines()]
+    jobs = _mapping_value([line for line in lines if line and not line.startswith("#")], "jobs:")
+    versions = []
+    for job in _entries(jobs):
+        for step in _entries(_mapping_value(job[1:], "steps:")):
+            versions.extend(_setup_python_versions(step))
+    return versions
+
+
 def places(root: str) -> list[tuple[str, object, object]]:
     """Return every place that names versions: where, what it names, what it has to name."""
     versions = supported(root)
     floor = versions[0] if versions else None
+    package_lock, docs_lock = _lock_interpreters(root)
+    pages = _pages_interpreters(root)
     return [
         (f"{PROJECT}: classifiers", versions or None, "at least one version"),
         (f"{PROJECT}: requires-python", _floor(root), floor),
         (f"{PROJECT}: python_version of mypy", _inside(_table(root, PROJECT), "tool", "mypy", "python_version"), floor),
         (f"{LINT_CONFIG}: target-version", _table(root, LINT_CONFIG).get("target-version"), _lint_target(floor)),
         (f"{MAKEFILE}: PYTHONS", _gate_interpreters(root), versions),
-        (f"{MAKEFILE}: --python-version of the lock", _LOCK_TARGET.findall(_text(root, MAKEFILE)), [floor]),
+        (f"{MAKEFILE}: --python-version of the lock", package_lock, [floor]),
+        (f"{PAGES_WORKFLOW}: python-version", pages, "exactly one version"),
+        (f"{MAKEFILE}: --python-version of the docs lock", docs_lock, pages),
+        (f"{DOCS_LOCK}: --python-version in the header", _LOCK_TARGET.findall(_text(root, DOCS_LOCK)), pages),
         (f"{LOCK}: --python-version in the header", _LOCK_TARGET.findall(_text(root, LOCK)), [floor]),
         (f"{WORKFLOW}: python-version", _workflow_interpreters(root, WORKFLOW), versions),
         (f"{RELEASE_WORKFLOW}: python-version", _workflow_interpreters(root, RELEASE_WORKFLOW), versions),
@@ -103,7 +162,12 @@ def problems(root: str) -> list[str]:
     """Return every place whose versions differ from the classifiers; empty when all agree."""
     found = []
     for place, named, expected in places(root):
-        agrees = named is not None if expected == "at least one version" else named == expected
+        if expected == "at least one version":
+            agrees = named is not None
+        elif expected == "exactly one version":
+            agrees = isinstance(named, list) and len(named) == 1
+        else:
+            agrees = named == expected
         if not agrees:
             found.append(f"{place}: names {named!r}, has to name {expected!r}")
     return found
@@ -118,7 +182,11 @@ def main() -> int:
     if found:
         return 1
     versions = ", ".join(supported(root))
-    sys.stdout.write(f"PASS: metadata, lint, type check, lock, gate and CI all name Python {versions}.\n")
+    pages = ", ".join(_pages_interpreters(root))
+    sys.stdout.write(
+        f"PASS: metadata, lint, type check, package lock, gate and CI all name Python {versions};"
+        f" the documentation lock names the Pages interpreter {pages}.\n"
+    )
     return 0
 
 

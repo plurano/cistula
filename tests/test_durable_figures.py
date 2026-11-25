@@ -43,8 +43,9 @@ def test_stated_reads_every_row_with_its_spans_in_microseconds() -> None:
     }
 
 
-def test_the_readme_of_the_repository_states_one_table() -> None:
-    with open(os.path.join(REPOSITORY, "README.md"), encoding="utf-8") as file:
+def test_the_guarantees_page_states_one_table() -> None:
+    """The guarantees page contains the expected figures and a matching tmpfs measurement."""
+    with open(os.path.join(REPOSITORY, "docs", "guarantees.md"), encoding="utf-8") as file:
         rows = figures.stated(file.read())
 
     assert {"btrfs", "zfs", "tmpfs"} <= set(rows)
@@ -96,10 +97,10 @@ def test_compare_passes_figures_inside_the_tolerance() -> None:
     [
         (2500.0, 15.0, []),
         (144000.0, 60.0, []),
-        (2499.0, 15.0, ["btrfs: measured 2499 µs for the default, the README states 10000 to 36000 µs"]),
-        (144001.0, 15.0, ["btrfs: measured 144001 µs for the default, the README states 10000 to 36000 µs"]),
-        (10000.0, 3.74, ["btrfs: measured 3.74 µs for durable=False, the README states 15 µs"]),
-        (10000.0, 60.1, ["btrfs: measured 60.1 µs for durable=False, the README states 15 µs"]),
+        (2499.0, 15.0, ["btrfs: measured 2499 µs for the default, the page states 10000 to 36000 µs"]),
+        (144001.0, 15.0, ["btrfs: measured 144001 µs for the default, the page states 10000 to 36000 µs"]),
+        (10000.0, 3.74, ["btrfs: measured 3.74 µs for durable=False, the page states 15 µs"]),
+        (10000.0, 60.1, ["btrfs: measured 60.1 µs for durable=False, the page states 15 µs"]),
     ],
 )
 def test_compare_allows_a_factor_of_four_either_way_and_no_more(
@@ -143,62 +144,68 @@ def test_compare_holds_every_disk_row_to_the_ratio(row: str, problem: str | None
 
 
 def test_main_passes_a_current_table(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    readme = tmp_path / "README.md"
-    readme.write_text(TABLE, encoding="utf-8")
+    """A current table passes against the measurement."""
+    page = tmp_path / "page.md"
+    page.write_text(TABLE, encoding="utf-8")
     measured = tmp_path / "durable.tsv"
     measured.write_text(measurement("ext2/ext3", 3000.0, 20.0), encoding="utf-8")
 
-    assert figures.main([str(readme), str(measured)]) == 0
+    assert figures.main([str(page), str(measured)]) == 0
     out, err = capsys.readouterr()
     assert out.splitlines() == [
         "ext2/ext3: default 3000 µs, durable=False 20 µs; no row of the table",
-        f"PASS: the durable-write figures in {readme} agree with the measurement.",
+        f"PASS: the durable-write figures in {page} agree with the measurement.",
     ]
     assert err == ""
 
 
 def test_main_fails_a_table_that_is_out_of_date(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    readme = tmp_path / "README.md"
-    readme.write_text(TABLE, encoding="utf-8")
+    """An out of date table fails against the measurement."""
+    page = tmp_path / "page.md"
+    page.write_text(TABLE, encoding="utf-8")
     measured = tmp_path / "durable.tsv"
     measured.write_text(measurement("btrfs", 900.0, 14.0), encoding="utf-8")
 
-    assert figures.main([str(readme), str(measured)]) == 1
+    assert figures.main([str(page), str(measured)]) == 1
     assert capsys.readouterr().err.splitlines() == [
-        f"FAIL: the durable-write figures in {readme} disagree with the measurement:",
-        "  btrfs: measured 900 µs for the default, the README states 10000 to 36000 µs",
+        f"FAIL: the durable-write figures in {page} disagree with the measurement:",
+        "  btrfs: measured 900 µs for the default, the page states 10000 to 36000 µs",
     ]
 
 
-def test_main_fails_a_readme_without_the_table(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    readme = tmp_path / "README.md"
-    readme.write_text("No table.\n", encoding="utf-8")
+def test_main_fails_a_page_without_the_table(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A page without the table fails with a diagnostic."""
+    page = tmp_path / "page.md"
+    page.write_text("No table.\n", encoding="utf-8")
     measured = tmp_path / "durable.tsv"
     measured.write_text(measurement("btrfs", 1.0, 1.0), encoding="utf-8")
 
-    assert figures.main([str(readme), str(measured)]) == 1
+    assert figures.main([str(page), str(measured)]) == 1
     assert capsys.readouterr().err == "FAIL: expected one table of durable-write figures, found 0\n"
 
 
-@pytest.mark.parametrize("argv", [[], ["README.md"], ["README.md", "durable.tsv", "more"]])
+@pytest.mark.parametrize("argv", [[], ["page.md"], ["page.md", "durable.tsv", "more"]])
 def test_main_refuses_a_wrong_argument_count(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    """An incorrect argument count reports usage."""
     assert figures.main(argv) == 2
-    assert capsys.readouterr().err == "usage: check_durable_figures.py README MEASUREMENT\n"
+    assert capsys.readouterr().err == "usage: check_durable_figures.py PAGE MEASUREMENT\n"
 
 
 def test_main_reports_a_missing_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert figures.main([str(tmp_path / "README.md"), str(tmp_path / "durable.tsv")]) == 2
-    assert capsys.readouterr().err.startswith("usage: check_durable_figures.py README MEASUREMENT: ")
+    """A missing input file reports a usage error."""
+    assert figures.main([str(tmp_path / "page.md"), str(tmp_path / "durable.tsv")]) == 2
+    assert capsys.readouterr().err.startswith("usage: check_durable_figures.py PAGE MEASUREMENT: ")
 
 
 def test_the_script_runs_as_the_gate_calls_it(tmp_path: Path) -> None:
-    readme = tmp_path / "README.md"
-    readme.write_text(TABLE, encoding="utf-8")
+    """The script reports mismatched figures when invoked in isolated mode."""
+    page = tmp_path / "page.md"
+    page.write_text(TABLE, encoding="utf-8")
     measured = tmp_path / "durable.tsv"
     measured.write_text(measurement("btrfs", 50.0, 14.0), encoding="utf-8")
 
     done = subprocess.run(
-        [sys.executable, "-I", script("check_durable_figures"), str(readme), str(measured)],
+        [sys.executable, "-I", script("check_durable_figures"), str(page), str(measured)],
         capture_output=True,
         text=True,
         timeout=60,

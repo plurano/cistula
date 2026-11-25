@@ -8,11 +8,11 @@
 
 The writers in `cistula.files` are durable by default. Each call flushes the
 temporary file before the rename and the directory after it
-([src/cistula/files.py](../../src/cistula/files.py)). A caller that writes
+([src/cistula/files.py](https://github.com/plurano/cistula/blob/main/src/cistula/files.py)). A caller that writes
 many files pays for both flushes once per file. The only cheaper call today
 is `durable=False`, which gives up crash safety completely.
 
-Measured with [tools/measure_durable_write.py](../../tools/measure_durable_write.py)
+Measured with [tools/measure_durable_write.py](https://github.com/plurano/cistula/blob/main/tools/measure_durable_write.py)
 on 2026-10-17 (Linux 7.2, Python 3.11, NVMe disks). Each figure is the time
 per file for 200 small files, from three runs:
 

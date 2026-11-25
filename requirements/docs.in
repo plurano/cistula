@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 Lusoris <lusoris@proton.me>
+# SPDX-License-Identifier: EUPL-1.2
+#
+# The documentation site (mkdocs.yml, built and published by
+# .github/workflows/pages.yml), in an environment of its own: the gate does not
+# build the site, so these stay out of dev.in. docs.txt is its lock, compiled
+# the same way as dev.txt by `make lock`.
+mkdocs==1.6.1
+mkdocs-material==9.8.1
+pymdown-extensions==13.1

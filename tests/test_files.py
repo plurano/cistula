@@ -231,6 +231,31 @@ def test_a_float_is_read_as_the_nearest_float_and_an_integer_stays_exact() -> No
     assert [type(item) for item in found] == [float, float, float, int]
 
 
+def test_an_integer_is_read_and_written_up_to_the_conversion_limit(tmp_path: Path) -> None:
+    """An integer up to the interpreter's digit limit round-trips; one digit more raises ValueError."""
+    limit = sys.get_int_max_str_digits()
+    if limit == 0:
+        pytest.skip("integer-string conversion limit disabled")
+    largest = "9" * limit
+    value = int(largest)
+    path = tmp_path / "int.json"
+
+    assert loads_json(largest) == value
+    write_json(path, value)
+    assert read_json(path) == value
+
+    with pytest.raises(ValueError, match="integer string conversion"):
+        loads_json("9" * (limit + 1))
+    with pytest.raises(ValueError, match="integer string conversion"):
+        write_json(path, pow(10, limit))
+    assert read_json(path) == value
+    lines = tmp_path / "int.jsonl"
+    lines.write_text("1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="integer string conversion"):
+        write_json_lines(lines, [value, pow(10, limit)])
+    assert lines.read_text(encoding="utf-8") == "1\n"
+
+
 @pytest.mark.parametrize("text", ["nan", "inf", "-inf", "NAN", "Inf", "+Infinity", "-NaN", "1e", "0x10", "01"])
 def test_finite_numbers_false_reads_no_other_spelling(text: str) -> None:
     with pytest.raises(json.JSONDecodeError):

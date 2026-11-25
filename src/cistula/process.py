@@ -3,10 +3,13 @@
 """Run a child process under a time limit that the caller must state.
 
 `run` starts the command in a process group of its own. When the time limit
-expires, the whole group is asked to stop and, after a grace period, killed,
-so a child that ignores the first signal or leaves a descendant behind cannot
-keep the caller waiting. `child_env` builds the environment for such a child
-without touching the environment of the calling process.
+expires, the whole group gets SIGTERM. If `communicate()` times out during the
+grace period, the group gets SIGKILL. This happens when the child still runs
+or any process, inside or outside the group, still holds an output pipe open.
+If the child exits and its pipes close during the grace period, a group member
+that ignores SIGTERM can survive (https://github.com/plurano/cistula/issues/82).
+`child_env` builds the environment for such a child without touching the
+environment of the calling process.
 
 POSIX only, and tested on Linux only: process groups and their signals do not
 exist on Windows, and `run` refuses to start there instead of running without
@@ -38,9 +41,7 @@ __all__ = [
     "run",
 ]
 
-# Seconds the output pipes may stay open after the group was killed. Only a
-# descendant that left the process group can hold them longer; its output is
-# then cut off here and the call returns.
+# Seconds to wait for remaining output after sending SIGKILL to the group.
 _DRAIN_SECONDS = 1.0
 
 _POSIX = os.name == "posix"
@@ -52,8 +53,10 @@ class Result:
 
     `returncode` is the exit status; a negative value `-N` means the child was
     ended by signal `N`. `timed_out` is true when the time limit expired and
-    the process group was stopped; the output collected until then is kept.
-    `duration` is the wall-clock time of the call in seconds.
+    the process group was signalled as `run` describes; the output collected
+    until then is kept. A group member that ignores `SIGTERM` and writes its
+    output elsewhere can outlive the call. `duration` is the wall-clock time
+    of the call in seconds.
     """
 
     argv: tuple[str, ...]
@@ -160,7 +163,12 @@ def _signal_group(group: int, number: signal.Signals) -> None:
 
 
 def _stop_group(child: subprocess.Popen[bytes], kill_after: float) -> tuple[bytes | None, bytes | None]:
-    """Stop the child's process group and return the output collected so far."""
+    """Signal the child's process group and return the output collected so far.
+
+    The group receives `SIGTERM` first. It receives `SIGKILL` if
+    `communicate()` times out while the child still runs or any process,
+    inside or outside the group, still holds an output pipe open.
+    """
     out: bytes | None = None
     err: bytes | None = None
     _signal_group(child.pid, signal.SIGTERM)
@@ -170,8 +178,7 @@ def _stop_group(child: subprocess.Popen[bytes], kill_after: float) -> tuple[byte
         except subprocess.TimeoutExpired as expired:
             out, err = expired.stdout, expired.stderr
             _signal_group(child.pid, signal.SIGKILL)
-    # A descendant outside the group still holds a pipe. The child itself is
-    # dead; the caller closes our ends, so keep what was read.
+    # Keep what was read. The caller closes our pipes and reaps the child.
     return out, err
 
 
@@ -243,13 +250,16 @@ def run(  # noqa: PLR0913 - one keyword per independent setting of a child proce
     check: bool = False,
     kill_after: float = 2.0,
 ) -> Result:
-    """Run `argv` and return its outcome; never wait longer than the time limit allows.
+    """Run `argv` with the given timeout and return its outcome.
 
     `timeout` is required and has no value that means "no limit": it must be a
     finite number of seconds greater than zero. When it expires, the child's
-    process group receives SIGTERM, then SIGKILL after `kill_after` seconds,
-    and the call returns with `timed_out` set. The longest a call can take is
-    `timeout + kill_after` plus one second for reading the remaining output.
+    process group receives SIGTERM. If `communicate()` times out after
+    `kill_after` seconds because the child still runs or any process, inside
+    or outside the group, still holds an output pipe open, the group receives
+    SIGKILL. The call allows one more second to read the remaining output,
+    then waits without a timeout for the child's exit status before returning
+    with `timed_out` set.
 
     `argv` is a sequence of arguments and is never given to a shell. `env`
     replaces the whole environment of the child; without it the child inherits

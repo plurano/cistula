@@ -1,6 +1,8 @@
 /.venv/
 /dist/
 /build/
+# The documentation site as `python -m mkdocs build` writes it (mkdocs.yml).
+/site/
 *.egg-info/
 __pycache__/
 *.pyc

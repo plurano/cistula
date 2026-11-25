@@ -1,6 +1,6 @@
 # ADR-0001: Release job: one reproducible build, a dry run while the repository is private
 
-- **Status**: Accepted (2026-10-17, after the tag run of `v0.1.0`)
+- **Status**: Superseded by [ADR-0003](0003-release-job.md) (2026-11-18); accepted 2026-10-17, after the tag run of `v0.1.0`
 - **Date**: 2026-10-11
 - **Authors**: lusoris
 
