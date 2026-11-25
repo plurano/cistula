@@ -28,9 +28,10 @@ no workflow declares the pin.
 2. Format, lint, types, licence headers, the exception list, the Codacy
    exclusions and the list of supported Python versions are checked once. Then
    [tools/scanners.py](https://github.com/plurano/cistula/blob/main/tools/scanners.py) runs semgrep with the rules in
-   [.config/semgrep/hiss.yml](https://github.com/plurano/cistula/blob/main/.config/semgrep/hiss.yml) and trivy on both
-   locks. Each scanner first has to report the defects planted in a scratch
-   folder; a scanner that reports nothing there fails the gate.
+   [.config/semgrep/hiss.yml](https://github.com/plurano/cistula/blob/main/.config/semgrep/hiss.yml) and trivy on
+   `requirements/dev.txt`, `requirements/semgrep.txt` and `requirements/docs.txt`.
+   Each scanner first has to report the defects planted in a scratch folder.
+   A scanner that reports nothing there fails the gate.
 3. One source distribution and one wheel are built, and their sizes are
    checked against the figures under [Reproducible package](#reproducible-package).
 4. Every interpreter builds both once more. One differing byte fails.
@@ -46,9 +47,11 @@ no workflow declares the pin.
 `make verify` runs steps 1 to 5 and needs no engine.
 
 `make lock` regenerates `requirements/dev.txt` from `requirements/dev.in`
-and `requirements/semgrep.txt` from `requirements/semgrep.in`. A release
-younger than three days is not eligible. semgrep has its own environment
-under `.venv/semgrep`, so its dependencies never pin those of the tests.
+and `requirements/semgrep.txt` from `requirements/semgrep.in`. It also
+compiles `requirements/docs.in` into `requirements/docs.txt` for Python 3.14.
+A release younger than three days is not eligible. semgrep has its own
+environment under `.venv/semgrep`, so its dependencies never pin those of
+the tests.
 
 Every public function has positive, negative and boundary tests. A test that
 guards a guarantee was seen failing once with the guarantee removed from the

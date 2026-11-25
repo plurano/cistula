@@ -102,12 +102,13 @@ SPDX-License-Identifier: EUPL-1.2
   `json.loads` reads them silently, the readers raise `ValueError`. A caller
   that must read a file holding such a number passes `finite_numbers=False`;
   that lifts this one check and no other, as `unique_keys=False` does for a
-  repeated key. An integer is read as a Python `int` and `write_json` writes
-  it up to the interpreter's limit on integer-string conversion
-  (`sys.get_int_max_str_digits()`, 4300 digits unless changed); a longer
-  integer raises `ValueError` when read, whatever the keywords. `write_json`
-  raises `ValueError` for such an `int` and for non-finite floats (`nan`, `inf`
-  and `-inf`) and leaves the old file whole
+  repeated key. Integers are read as Python `int` values. While the
+  interpreter's integer-string conversion limit is enabled, reading or
+  writing an integer longer than `sys.get_int_max_str_digits()` (4300 digits
+  by default) raises `ValueError`, whatever the keywords. Calling
+  `sys.set_int_max_str_digits(0)` allows integers of any length to be read
+  and written. Non-finite floats (`nan`, `inf` and `-inf`) also raise
+  `ValueError` on write. These conversion errors leave the old file whole
   ([tests/test_files.py](https://github.com/plurano/cistula/blob/main/tests/test_files.py),
   `test_an_integer_is_read_and_written_up_to_the_conversion_limit`,
   `test_each_keyword_lifts_its_own_check_only`).

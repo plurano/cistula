@@ -3,11 +3,11 @@
 """Run a child process under a time limit that the caller must state.
 
 `run` starts the command in a process group of its own. When the time limit
-expires, the whole group gets SIGTERM and, after a grace period, SIGKILL while
-the child still runs or a group member still holds its output open, so a child
-that ignores the first signal or a descendant that holds the output cannot
-keep the caller waiting. A group member that ignores SIGTERM after the child
-has exited keeps running (https://github.com/plurano/cistula/issues/82).
+expires, the whole group gets SIGTERM. If `communicate()` times out during the
+grace period, the group gets SIGKILL. This happens when the child still runs
+or any process, inside or outside the group, still holds an output pipe open.
+If the child exits and its pipes close during the grace period, a group member
+that ignores SIGTERM can survive (https://github.com/plurano/cistula/issues/82).
 `child_env` builds the environment for such a child without touching the
 environment of the calling process.
 
@@ -41,9 +41,7 @@ __all__ = [
     "run",
 ]
 
-# Seconds the output pipes may stay open after the group was killed. Only a
-# descendant that left the process group can hold them longer; its output is
-# then cut off here and the call returns.
+# Seconds to wait for remaining output after sending SIGKILL to the group.
 _DRAIN_SECONDS = 1.0
 
 _POSIX = os.name == "posix"
@@ -167,9 +165,9 @@ def _signal_group(group: int, number: signal.Signals) -> None:
 def _stop_group(child: subprocess.Popen[bytes], kill_after: float) -> tuple[bytes | None, bytes | None]:
     """Signal the child's process group and return the output collected so far.
 
-    `SIGTERM` goes first; `SIGKILL` follows only while the child still runs or
-    a group member still holds its output pipes open, so a member that ignores
-    `SIGTERM` and writes its output elsewhere can outlive the call.
+    The group receives `SIGTERM` first. It receives `SIGKILL` if
+    `communicate()` times out while the child still runs or any process,
+    inside or outside the group, still holds an output pipe open.
     """
     out: bytes | None = None
     err: bytes | None = None
@@ -180,8 +178,7 @@ def _stop_group(child: subprocess.Popen[bytes], kill_after: float) -> tuple[byte
         except subprocess.TimeoutExpired as expired:
             out, err = expired.stdout, expired.stderr
             _signal_group(child.pid, signal.SIGKILL)
-    # A descendant outside the group still holds a pipe. The child itself is
-    # dead; the caller closes our ends, so keep what was read.
+    # Keep what was read. The caller closes our pipes and reaps the child.
     return out, err
 
 
@@ -253,14 +250,16 @@ def run(  # noqa: PLR0913 - one keyword per independent setting of a child proce
     check: bool = False,
     kill_after: float = 2.0,
 ) -> Result:
-    """Run `argv` and return its outcome; never wait longer than the time limit allows.
+    """Run `argv` with the given timeout and return its outcome.
 
     `timeout` is required and has no value that means "no limit": it must be a
     finite number of seconds greater than zero. When it expires, the child's
-    process group receives SIGTERM, then SIGKILL after `kill_after` seconds
-    while the child still runs or a group member still holds its output open,
-    and the call returns with `timed_out` set. The longest a call can take is
-    `timeout + kill_after` plus one second for reading the remaining output.
+    process group receives SIGTERM. If `communicate()` times out after
+    `kill_after` seconds because the child still runs or any process, inside
+    or outside the group, still holds an output pipe open, the group receives
+    SIGKILL. The call allows one more second to read the remaining output,
+    then waits without a timeout for the child's exit status before returning
+    with `timed_out` set.
 
     `argv` is a sequence of arguments and is never given to a shell. `env`
     replaces the whole environment of the child; without it the child inherits
