@@ -34,7 +34,8 @@ _FLOOR = re.compile(r"^>=(3\.\d+)$")
 _GATE_INTERPRETERS = re.compile(r"^PYTHONS \?=(.*)$", re.MULTILINE)
 _LOCK_TARGET = re.compile(r"--python-version=(\S+)")
 _WORKFLOW_LIST = re.compile(r"^ +python-version: \|\n((?: +\S+\n)+)", re.MULTILINE)
-_PAGES_INTERPRETER = re.compile(r"""^ +python-version: ["']?(3\.\d+)["']?[ \t]*$""", re.MULTILINE)
+_SETUP_PYTHON = re.compile(r"""uses:\s+["']?actions/setup-python@""")
+_PAGES_INTERPRETER = re.compile(r"""python-version:\s+(["']?)(3\.\d+)\1""")
 
 
 def _text(root: str, file: str) -> str:
@@ -92,9 +93,43 @@ def _lock_interpreters(root: str) -> tuple[list[str], list[str]]:
     return package, docs
 
 
+def _entries(lines: list[str]) -> list[list[str]]:
+    """Split a YAML block at its direct children, retaining each child's nested lines."""
+    if not lines:
+        return []
+    indent = len(lines[0]) - len(lines[0].lstrip())
+    entries: list[list[str]] = []
+    for line in lines:
+        if len(line) - len(line.lstrip()) == indent:
+            entries.append([])
+        entries[-1].append(line)
+    return entries
+
+
+def _mapping_value(lines: list[str], key: str) -> list[str]:
+    """Return the nested lines of a direct mapping key."""
+    return next((entry[1:] for entry in _entries(lines) if entry[0].strip() == key), [])
+
+
+def _setup_python_versions(step: list[str]) -> list[str]:
+    """Read the python-version inputs of one setup-python step."""
+    # Align the key following the list marker with the step's other keys.
+    fields = [step[0].replace("- ", "  ", 1), *step[1:]]
+    if not any(_SETUP_PYTHON.match(entry[0].strip()) for entry in _entries(fields)):
+        return []
+    inputs = _entries(_mapping_value(fields, "with:"))
+    return [match[2] for entry in inputs if (match := _PAGES_INTERPRETER.fullmatch(entry[0].strip()))]
+
+
 def _pages_interpreters(root: str) -> list[str]:
     """Return the interpreter versions the Pages workflow sets up."""
-    return _PAGES_INTERPRETER.findall(_text(root, PAGES_WORKFLOW))
+    lines = [line.partition(" #")[0].rstrip() for line in _text(root, PAGES_WORKFLOW).splitlines()]
+    jobs = _mapping_value([line for line in lines if line and not line.startswith("#")], "jobs:")
+    versions = []
+    for job in _entries(jobs):
+        for step in _entries(_mapping_value(job[1:], "steps:")):
+            versions.extend(_setup_python_versions(step))
+    return versions
 
 
 def places(root: str) -> list[tuple[str, object, object]]:

@@ -93,6 +93,26 @@ def test_a_pages_workflow_with_two_interpreters_fails(copy: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "replacement",
+    [
+        (
+            "      - name: Print the version\n"
+            "        run: |\n"
+            "          cat <<'EOF'\n"
+            '          python-version: "3.14"\n'
+            "          EOF\n"
+        ),
+        '        env:\n          python-version: "3.14"\n',
+        '      - uses: example/another-action@v1\n        with:\n          python-version: "3.14"\n',
+    ],
+)
+def test_pages_version_must_be_an_input_to_setup_python(copy: str, replacement: str) -> None:
+    change(copy, check.PAGES_WORKFLOW, '        with:\n          python-version: "3.14"\n', replacement)
+    expected = f"{check.PAGES_WORKFLOW}: python-version: names [], has to name 'exactly one version'"
+    assert expected in check.problems(copy)
+
+
+@pytest.mark.parametrize(
     ("file", "old", "new", "place"),
     [
         (check.PROJECT, FLOOR, 'requires-python = ">=3.12"', "pyproject.toml: requires-python"),
