@@ -97,7 +97,10 @@ jobs:
     permissions:
       contents: read
       pages: write
-      id-token: write
+      # Codacy's Opengrep rule reads the next key as a hard-coded token. It is
+      # a permission scope: it lets this job request the short-lived OIDC
+      # token that actions/deploy-pages needs, and the file stores no token.
+      id-token: write  # nosemgrep: codacy.yaml.security.hard-coded-tokens -- scope name, no token
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
